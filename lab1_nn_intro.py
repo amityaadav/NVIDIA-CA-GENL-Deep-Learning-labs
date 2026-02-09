@@ -21,7 +21,8 @@ valid_set = torchvision.datasets.MNIST("./data/", train=False, download=True)
 print(train_set)
 print(valid_set)
 
-x_0, y_0 = train_set[0]
+x_0, y_0 = train_set[0]     # Primary test data
+x_7, y_7 = train_set[6]     # Secondary test data
 
 ## display the first PIL Image item in the dataset
 # x_0.show()
@@ -82,7 +83,7 @@ layers = [
     nn.ReLU(),                      # Input layer activation function
     nn.Linear(512, n_classes)   # Output layer
 ]
-print(f"These are the model layer properties: {layers}")
+print(f"These are the layer properties: {layers}")
 
 # Sequential model expects sequential arguments to be passed 
 model = nn.Sequential(*layers)
@@ -145,12 +146,12 @@ for epoch in range(epochs):
     train()
     validate()
 
-# Prediction - convert x_0 object to tensor and add batch dimension
-x_0_tensor = trans(x_0)  # Convert PIL to tensor: [1, 28, 28]
-x_0_batch = x_0_tensor.unsqueeze(0)  # Add batch dim: [1, 1, 28, 28]
-x_0_batch = x_0_batch.to(device)  # Move to same device as model
+# Prediction - convert x_0/x_7 object to tensor and add batch dimension
+x_7_tensor = trans(x_7)  # Convert PIL to tensor: [1, 28, 28]
+x_7_batch = x_7_tensor.unsqueeze(0)  # Add batch dim: [1, 1, 28, 28]
+x_7_batch = x_7_batch.to(device)  # Move to same device as model
 
-prediction = model(x_0_batch)
+prediction = model(x_7_batch)
 print(f"Prediction Tensor: {prediction}")
 print(f"Predicted class: {prediction.argmax(dim=1).item()}")
-print(f"Actual: {y_0}")
+print(f"Actual: {y_7}")
