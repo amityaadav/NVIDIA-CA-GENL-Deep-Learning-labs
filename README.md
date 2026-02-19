@@ -11,9 +11,26 @@ This lab is considered the "Hello World" of neural networks.  Before I could fol
 - What are Optimizers and the popular types (Adam, Adagrad, RMSprop, SGD)
 - Non-mathematical theory of gradient descent and how it helps model adjust the weight in the optimizers
 - What is a Loss function and popular types (Mean Squared Error, RootMSE)
+- Lab outcome: 
+    - Epochs: 5
+    - Training - Loss: 62.98, Accuracy:98.89%
+    - Validation - Loss: 23.56, Accuracy: 97.98%
 
 
 ## Lab 2 - Creating and Training a Neural Network on American Sign Language dataset
+This lab uses American Sign Language(ASL) image dataset to train a model.  The objective is to demonstrate that you may achieve high accuracy with training data, but when running the validation data, the model does not perform well (Overfits).  
+- Lab outcome: 
+    - Epochs: 20
+    - Training - Loss: 11.05, Accuracy:99.66%
+    - Validation - Loss: 220.91, Accuracy: 81.64%
 
 
-## Lab 3 - Creating a Convolutional Neural Networks (CNN) and understand Data Augmentation
+## Lab 3 - Creating a simple Convolutional Neural Networks (CNN) for ASL dataset
+This lab applies CNN techniques on the ASL model to improve accuracy.
+In this lab I learned:
+- CNN fundamentals: Regularization, Data Augmentation, Kernel, Stride, Max Pooling, Padding, Dropout
+- PyTorch: nn.Conv2d, nn.MaxPool2d, nn.Dropout
+- Lab outcome: 
+    - Epochs: 20
+    - Training - Loss: 00.81, Accuracy:99.66%
+    - Validation - Loss: 24.51, Accuracy: 97.49%
