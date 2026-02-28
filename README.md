@@ -37,9 +37,16 @@ In this lab I learned:
 
 
 ## Lab 4 A - Using the prior CNN model and augmenting the data
-- Data augmentation: Further reducing the loss and increasing the accuracy of the model  by increased size of image quantiy (augmented image data), which provides the model variance in patterns.  Image augmentation should consider the reality of augmented data, for example, an inverse ASL image is not realistic while slightly tilted are ok.
+Data augmentation: Further reducing the loss and increasing the accuracy of the model  by increased size of image quantiy (augmented image data), which provides the model variance in patterns.  Image augmentation should consider the reality of augmented data, for example, an inverse ASL image is not realistic while slightly tilted are ok.
 
 - Lab outcome: 
     - Epochs: 20
     - Training - Loss: 12.28 Accuracy: 99.59%
     - Validation - Loss: 7.49 Accuracy: 98.76%
+
+
+## Lab 4 B - Use prior saved CNN model, load an unseen image, run it through the model
+The objective in this lab was to load an image that the mdoel has never seen and inference it through the trained model from previous lab. 
+
+## Lab 5 - Natural Language Processing
+The objective of this lab was to tokenize text and use embedings as feature to train a small neural network.
