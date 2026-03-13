@@ -13,7 +13,6 @@ import utils
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 torch.cuda.is_available()
 
-
 from torchvision.models import vgg16
 from torchvision.models import VGG16_Weights
 
@@ -21,7 +20,7 @@ weights = VGG16_Weights.DEFAULT
 vgg_model = vgg16(weights=weights)
 
 # Freeze base model
-vgg_model.requires_grad_(True)
+vgg_model.requires_grad_(False)   # Gradient descent false, no backpropgation, no update to the weights or biases
 next(iter(vgg_model.parameters())).requires_grad
 
 vgg_model.classifier[0:3]
@@ -35,12 +34,13 @@ my_model = nn.Sequential(
     vgg_model.classifier[0:3],
     nn.Linear(4096, 500),
     nn.ReLU(),
+    nn.Dropout(0.5), 
     nn.Linear(500, N_CLASSES)
 )
 my_model
 
 
-loss_function = nn.BCEWithLogitsLoss()
+loss_function = nn.CrossEntropyLoss()
 optimizer = Adam(my_model.parameters())
 my_model = my_model.to(device)
 
@@ -49,10 +49,10 @@ pre_trans = weights.transforms()
 IMG_WIDTH, IMG_HEIGHT = (224, 224)
 
 random_trans = transforms.Compose([
-    transforms.RandomRotation(25),
-    transforms.RandomResizedCrop((IMG_WIDTH, IMG_HEIGHT), scale=(.8, 1), ratio=(1, 1)),
     transforms.RandomHorizontalFlip(),
-    transforms.ColorJitter(brightness=.2, contrast=.2, saturation=.2, hue=.2)
+    transforms.RandomResizedCrop(224, scale=(0.8, 1.0)),
+    transforms.RandomRotation(15),
+    transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2),
 ])
 
 
@@ -80,7 +80,7 @@ class MyDataset(Dataset):
     def __len__(self):
         return len(self.imgs)
 
-n = 32
+n = 32   # batch size
 
 train_path = "data/fruits/train/"
 train_data = MyDataset(train_path)
@@ -89,11 +89,11 @@ train_N = len(train_loader.dataset)
 
 valid_path = "data/fruits/valid/"
 valid_data = MyDataset(valid_path)
-valid_loader = DataLoader(valid_data, batch_size=n, shuffle=True)
+valid_loader = DataLoader(valid_data, batch_size=n, shuffle=False)
 valid_N = len(valid_loader.dataset)
 
 
-epochs = 10
+epochs = 15
 
 for epoch in range(epochs):
     print('Epoch: {}'.format(epoch))
@@ -103,9 +103,9 @@ for epoch in range(epochs):
 
 # Unfreeze the base model
 vgg_model.requires_grad_(True)
-optimizer = Adam(my_model.parameters(), lr=.0001)
+optimizer = Adam(my_model.parameters(), lr=1r-6)  # Fine tuning rate
 
-epochs = 1
+epochs = 5
 
 for epoch in range(epochs):
     print('Epoch: {}'.format(epoch))
@@ -115,4 +115,16 @@ for epoch in range(epochs):
 
 utils.validate(my_model, valid_loader, valid_N, loss_function)
 
-print(run_assessment(my_model))
+correct = 0
+total = 0
+my_model.eval()
+with torch.no_grad():
+    for imgs, labels in valid_loader:
+        outputs = my_model(imgs)
+        _, predicted = torch.max(outputs, 1)
+        total += labels.size(0)
+        correct += (predicted == labels).sum().item()
+
+accuracy = correct / total
+print(f"Final accuracy: {accuracy:.4f}")
+print("PASS" if accuracy >= 0.92 else "Needs more tuning")

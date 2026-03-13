@@ -67,3 +67,5 @@ def predict_letter(file_path):
 print(predict_letter("data/asl_images/b.png"))
 
 print(predict_letter("data/asl_images/a.png"))
+
+
