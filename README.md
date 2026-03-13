@@ -38,7 +38,7 @@ In this lab I learned:
 
 
 ## Lab 4.A - Using the prior CNN model and augmenting the data
-The objective of this lab was to demonstrate the importance of data augmentation and what factors/features to consider when augmenting data.  Data augmentation reduced the loss and incread the accuracy of the model.  Several techniques augmenting techniques were applied to the images, such as increased number of image quantiy, random rotation, slightly dialining in brightness and contrast, which provides the model with variance in patterns.  Image augmentation should always consider the use case for what it's being trained for, for example, an inverse ASL image is not realistic while slightly rotated/tilted are ok.
+The objective of this lab was to demonstrate the importance of data augmentation and what factors/features to consider when augmenting data.  Data augmentation reduced the loss and increased the accuracy of the model.  Several augmenting techniques were applied to the images, such as increased number of quantiy, random rotation, slightly dialing in brightness and contrast, which provides the model with variance in patterns.  Image augmentation should always consider the use case for what it's being trained for, for example, an inverse ASL image is not realistic while slightly rotated/tilted are ok.
 - Lab outcome: 
     - Epochs: 20
     - Training - Loss: 12.28 Accuracy: 99.59%
@@ -46,7 +46,7 @@ The objective of this lab was to demonstrate the importance of data augmentation
 
 
 ## Lab 4.B - Use the saved CNN model from Lab 4.A, load an unseen image and run it through the model
-The objective in this lab was to load an image that the mdoel has never seen and inference it through the trained model from previous lab. 
+The objective in this lab was to load an image that the model has never seen and inference it through the trained model from previous lab. 
 
 
 ## Lab 5 - Demonstrate transfer learning; Leverage a pre-trained model to inference unseen data
@@ -54,7 +54,7 @@ The objective of this lab was to demonstrate the use of transfer learning by usi
 
 
 ## Lab 6 - Natural Language Processing
-The objective of this lab was to tokenize text and use embedings.  Importing BERT model and passing a statement to tokenize text.
+The objective of this lab was to tokenize text and use embeddings.  Importing BERT model and passing a statement to tokenize text.
 
 
 ## Lab 7 - Assessment lab
