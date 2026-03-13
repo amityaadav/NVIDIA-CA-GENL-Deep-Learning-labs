@@ -1,5 +1,5 @@
 # NVIDIA Deep Learning Labs
-These labs are hands-on python labs designed to teach the fundamentals of Deep Learning by allowing students to build and train very simple Artificial Neural Networks. Additional labs discuss Transformer architecture and Natural Language Processing
+These labs are hands-on python labs designed to teach the fundamentals of Deep Learning by allowing students to build and train Artificial Neural Networks. 
 
 
 ## Lab 1 - Creating and Training a Neural Network on MNIST dataset
@@ -25,7 +25,7 @@ This lab uses American Sign Language(ASL) image dataset to train a model.  The o
     - Validation - Loss: 220.91, Accuracy: 81.64%
 
 
-## Lab 3 - Creating a simple Convolutional Neural Networks (CNN) for ASL dataset
+## Lab 3 - Creating a Convolutional Neural Network (CNN) for American Sign Language dataset
 In lab 2, the neural network could not predict ASL images higher than 81% accuracy.  While the loss for training dataset remained low, the loss continued to stay high for validation dataset over the last few epochs indicating to model overfitting.  In Lab 3, CNN techniques were applied on the ASL dataset to improve accuracy.
 
 In this lab I learned:
@@ -37,7 +37,7 @@ In this lab I learned:
     - Validation - Loss: 24.51, Accuracy: 97.49%
 
 
-## Lab 4.A - Using the prior CNN model and augmenting the data
+## Lab 4.A - Using the prior CNN model with augmented data to improve Accuracy
 The objective of this lab was to demonstrate the importance of data augmentation and what factors/features to consider when augmenting data.  Data augmentation reduced the loss and increased the accuracy of the model.  Several augmenting techniques were applied to the images, such as increased number of quantiy, random rotation, slightly dialing in brightness and contrast, which provides the model with variance in patterns.  Image augmentation should always consider the use case for what it's being trained for, for example, an inverse ASL image is not realistic while slightly rotated/tilted are ok.
 - Lab outcome: 
     - Epochs: 20
