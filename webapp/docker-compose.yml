@@ -1,0 +1,23 @@
+# Local one-command run of the full stack.
+#   docker compose up --build
+# Frontend on http://localhost:8080, backend on http://localhost:8000.
+services:
+  backend:
+    build: ./backend
+    ports:
+      - "8000:8000"
+    environment:
+      # Restrict to the frontend origin. Set to your real domain in production.
+      ALLOWED_ORIGINS: "http://localhost:8080"
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        # Where the browser reaches the backend. For a real deploy this is your
+        # public API domain, not localhost.
+        VITE_API_URL: "http://localhost:8000"
+    ports:
+      - "8080:80"
+    depends_on:
+      - backend

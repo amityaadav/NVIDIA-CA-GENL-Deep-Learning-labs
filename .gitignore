@@ -1,3 +1,11 @@
 /.vscode
 /data
 /pytorchvenv
+
+# webapp
+webapp/backend/data/
+webapp/backend/.venv/
+webapp/**/__pycache__/
+webapp/frontend/node_modules/
+webapp/frontend/dist/
+webapp/frontend/.env
