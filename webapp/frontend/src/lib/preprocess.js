@@ -12,9 +12,11 @@
  *   4. paste it into a 28x28 field so the center of mass lands at the middle
  *   5. read back 28x28 grayscale as white-on-black -> 784 floats in [0, 1]
  *
- * Returns null if the canvas is effectively blank.
+ * `normalize` returns the 784 input plus the intermediate geometry and a
+ * white-on-black ink canvas, so the UI can animate the crop/scale/center.
+ * `canvasToInput` is the thin wrapper that returns just the input (or null).
  */
-export function canvasToInput(sourceCanvas) {
+export function normalize(sourceCanvas) {
   const w = sourceCanvas.width;
   const h = sourceCanvas.height;
   const ctx = sourceCanvas.getContext("2d");
@@ -95,5 +97,17 @@ export function canvasToInput(sourceCanvas) {
   for (let i = 0; i < 28 * 28; i++) {
     input[i] = px[i * 4] / 255; // white-on-black, so brightness == ink
   }
-  return input;
+
+  return {
+    input,
+    // Everything the normalization animation needs to replay crop -> scale -> center.
+    geometry: { w, h, minX, minY, boxW, boxH, comX, comY, scale },
+    inkCanvas: src, // white-on-black, full source size
+  };
+}
+
+/** Just the 784 input (or null if the canvas is effectively blank). */
+export function canvasToInput(sourceCanvas) {
+  const result = normalize(sourceCanvas);
+  return result ? result.input : null;
 }

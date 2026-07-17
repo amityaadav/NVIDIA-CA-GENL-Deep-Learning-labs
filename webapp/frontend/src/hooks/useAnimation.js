@@ -57,6 +57,12 @@ export function useAnimation(phases, { msPerPhase = 900 } = {}) {
     setProgress(0);
   }, []);
 
+  // Jump straight to the fully-revealed state without animating (Live mode).
+  const snapToEnd = useCallback(() => {
+    setPlaying(false);
+    setProgress(phases);
+  }, [phases]);
+
   const stepForward = useCallback(() => {
     setPlaying(false);
     setProgress((p) => Math.min(phases, Math.floor(p + 1e-6) + 1));
@@ -67,5 +73,5 @@ export function useAnimation(phases, { msPerPhase = 900 } = {}) {
     setProgress((p) => Math.max(0, Math.ceil(p - 1e-6) - 1));
   }, []);
 
-  return { progress, playing, speed, setSpeed, play, pause, toggle, restart, stepForward, stepBack };
+  return { progress, playing, speed, setSpeed, play, pause, toggle, restart, snapToEnd, stepForward, stepBack };
 }

@@ -6,6 +6,7 @@
 webapp/backend/data/
 webapp/backend/.venv/
 webapp/**/__pycache__/
+webapp/backend/.pytest_cache/
 webapp/frontend/node_modules/
 webapp/frontend/dist/
 webapp/frontend/.env
