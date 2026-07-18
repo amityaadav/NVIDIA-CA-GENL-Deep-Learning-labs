@@ -10,3 +10,4 @@ webapp/backend/.pytest_cache/
 webapp/frontend/node_modules/
 webapp/frontend/dist/
 webapp/frontend/.env
+webapp/backend/static/

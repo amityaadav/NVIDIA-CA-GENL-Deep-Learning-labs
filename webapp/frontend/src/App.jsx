@@ -5,11 +5,16 @@ import Controls from "./components/Controls.jsx";
 import ContributorPanel from "./components/ContributorPanel.jsx";
 import NeuronInspector from "./components/NeuronInspector.jsx";
 import LegendItem from "./components/LegendItem.jsx";
+import TrainingPanel from "./components/TrainingPanel.jsx";
 import { useAnimation } from "./hooks/useAnimation.js";
 import { canvasToInput, normalize } from "./lib/preprocess.js";
 import { runInference, runExplain, runNeuron } from "./lib/api.js";
 
 const PHASES = 4; // input + 2 hidden + output
+
+// The "Watch it learn" tab is hidden for the public demo (inference only).
+// Flip to true to restore the training tab and its controls.
+const TRAINING_ENABLED = false;
 
 export default function App() {
   const drawRef = useRef(null);
@@ -23,6 +28,7 @@ export default function App() {
   const [live, setLive] = useState(false); // predict continuously while drawing
   const [prep, setPrep] = useState(null); // { geometry, inkCanvas, t } normalization morph
   const prepRafRef = useRef(0);
+  const [mode, setMode] = useState("infer"); // "infer" | "train"
 
   const anim = useAnimation(PHASES);
   const { play, restart, snapToEnd } = anim;
@@ -166,15 +172,16 @@ export default function App() {
     restart();
   }, [restart, cancelPreprocess]);
 
-  // Convenience: Enter runs inference, Escape clears.
+  // Convenience: Enter runs inference, Escape clears (only in the infer tab).
   useEffect(() => {
+    if (mode !== "infer") return;
     const onKey = (e) => {
       if (e.key === "Enter") handleRun();
       if (e.key === "Escape") handleClear();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [handleRun, handleClear]);
+  }, [handleRun, handleClear, mode]);
 
   // Total connections in the fully-connected net vs. how many we actually draw
   // (only the strongest few per layer — see TOP_EDGES_PER_TRANSITION).
@@ -202,6 +209,30 @@ export default function App() {
         </p>
       </header>
 
+      {TRAINING_ENABLED && (
+        <div className="mode-tabs" role="tablist">
+          <button
+            role="tab"
+            aria-selected={mode === "infer"}
+            className={`mode-tab ${mode === "infer" ? "on" : ""}`}
+            onClick={() => setMode("infer")}
+          >
+            Watch it think
+          </button>
+          <button
+            role="tab"
+            aria-selected={mode === "train"}
+            className={`mode-tab ${mode === "train" ? "on" : ""}`}
+            onClick={() => setMode("train")}
+          >
+            Watch it learn
+          </button>
+        </div>
+      )}
+
+      {TRAINING_ENABLED && mode === "train" && <TrainingPanel />}
+
+      {(!TRAINING_ENABLED || mode === "infer") && (
       <main className="layout">
         <section className="panel draw-panel">
           <h2>1 · Draw</h2>
@@ -327,6 +358,7 @@ export default function App() {
           )}
         </section>
       </main>
+      )}
     </div>
   );
 }

@@ -1,52 +1,38 @@
-const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
-
 /**
- * Send a 784-length pixel array (row-major 28x28, values 0..1) to the backend
- * and get back the full activation trace to animate.
+ * App API. Inference runs entirely in the browser (see model.js) so the app is
+ * fully static — no backend needed. Training (the hidden "Watch it learn" tab)
+ * still streams from the backend when enabled.
  */
+import { getModel } from "./model.js";
+
 export async function runInference(pixels) {
-  const res = await fetch(`${API_URL}/inference`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ pixels }),
-  });
-  if (!res.ok) {
-    const detail = await res.text().catch(() => "");
-    throw new Error(`Inference failed (${res.status}). ${detail}`);
-  }
-  return res.json();
+  const model = await getModel();
+  return model.predict(pixels);
 }
 
-/**
- * Ask "why this digit?": returns the backward sub-network (selected nodes per
- * layer + connecting edges) that drove output `target` on this drawing.
- */
+/** "Why this digit?" — the backward sub-network that drove output `target`. */
 export async function runExplain(pixels, target) {
-  const res = await fetch(`${API_URL}/explain`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ pixels, target }),
-  });
-  if (!res.ok) {
-    const detail = await res.text().catch(() => "");
-    throw new Error(`Explain failed (${res.status}). ${detail}`);
-  }
-  return res.json();
+  const model = await getModel();
+  return model.explain(pixels, target);
 }
 
-/**
- * Inspect one neuron: its weighted-sum breakdown (bias, z, a, top terms) and,
- * for hidden_1, its weights as a 28x28 image ("what is it looking for?").
- */
+/** One neuron's weighted-sum breakdown (+ weight image for hidden_1). */
 export async function runNeuron(pixels, layer, index) {
-  const res = await fetch(`${API_URL}/neuron`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ pixels, layer, index }),
-  });
-  if (!res.ok) {
-    const detail = await res.text().catch(() => "");
-    throw new Error(`Neuron inspect failed (${res.status}). ${detail}`);
-  }
-  return res.json();
+  const model = await getModel();
+  return model.neuron(pixels, layer, index);
 }
+
+// --- training (backend, only used by the hidden Train tab) ---
+const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
+
+export function openTrainStream({ lr, batchSize, epochs }) {
+  const url = new URL(`${API_URL}/train`);
+  url.searchParams.set("lr", lr);
+  url.searchParams.set("batch_size", batchSize);
+  url.searchParams.set("epochs", epochs);
+  return new EventSource(url);
+}
+
+// Start fetching the weights as soon as the app loads, so the first prediction
+// is instant.
+getModel().catch(() => {});

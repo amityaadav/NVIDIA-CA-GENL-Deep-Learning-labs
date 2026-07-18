@@ -99,9 +99,9 @@ class Predictor:
         ]
 
         transitions = [
-            self._top_edges("input", "hidden_1", act["input"], self.model.hidden_1.weight),
-            self._top_edges("hidden_1", "hidden_2", act["hidden_1"], self.model.hidden_2.weight),
-            self._top_edges("hidden_2", "output", act["hidden_2"], self.model.output.weight),
+            _top_edges("input", "hidden_1", act["input"], self.model.hidden_1.weight),
+            _top_edges("hidden_1", "hidden_2", act["hidden_1"], self.model.hidden_2.weight),
+            _top_edges("hidden_2", "output", act["hidden_2"], self.model.output.weight),
         ]
 
         return {
@@ -188,31 +188,64 @@ class Predictor:
             result["weightImage"] = [round(float(v), 5) for v in w.tolist()]
         return result
 
-    def _top_edges(self, src_name: str, dst_name: str, src_act: torch.Tensor, weight: torch.Tensor):
-        """Strongest edges src_i -> dst_j ranked by |weight[j, i] * activation_i|.
 
-        This is the actual contribution each connection makes on THIS input, so
-        the highlighted path reflects how the network reached its answer rather
-        than being decorative. weight has shape [dst, src].
-        """
-        contrib = weight.detach() * src_act.unsqueeze(0)  # [dst, src]
-        flat = contrib.abs().flatten()
-        k = min(TOP_EDGES_PER_TRANSITION, flat.numel())
-        top_vals, top_idx = torch.topk(flat, k)
-        n_src = weight.shape[1]
+def _top_edges(src_name: str, dst_name: str, src_act: torch.Tensor, weight: torch.Tensor):
+    """Strongest edges src_i -> dst_j ranked by |weight[j, i] * activation_i|.
 
-        max_v = float(top_vals[0]) if float(top_vals[0]) > 0 else 1.0
-        links = []
-        for flat_i in top_idx.tolist():
-            dst_j, src_i = divmod(flat_i, n_src)
-            signed = float(contrib[dst_j, src_i])
-            links.append({
-                "src": src_i,
-                "dst": dst_j,
-                "strength": round(abs(signed) / max_v, 4),  # 0..1 for opacity/width
-                "sign": 1 if signed >= 0 else -1,            # excitatory vs inhibitory
-            })
-        return {"from": src_name, "to": dst_name, "links": links}
+    This is the actual contribution each connection makes on THIS input, so the
+    highlighted path reflects how the network reached its answer rather than
+    being decorative. weight has shape [dst, src].
+    """
+    contrib = weight.detach() * src_act.unsqueeze(0)  # [dst, src]
+    flat = contrib.abs().flatten()
+    k = min(TOP_EDGES_PER_TRANSITION, flat.numel())
+    top_vals, top_idx = torch.topk(flat, k)
+    n_src = weight.shape[1]
+
+    max_v = float(top_vals[0]) if float(top_vals[0]) > 0 else 1.0
+    links = []
+    for flat_i in top_idx.tolist():
+        dst_j, src_i = divmod(flat_i, n_src)
+        signed = float(contrib[dst_j, src_i])
+        links.append({
+            "src": src_i,
+            "dst": dst_j,
+            "strength": round(abs(signed) / max_v, 4),  # 0..1 for opacity/width
+            "sign": 1 if signed >= 0 else -1,            # excitatory vs inhibitory
+        })
+    return {"from": src_name, "to": dst_name, "links": links}
+
+
+def forward_trace(model, x) -> dict:
+    """An /inference-shaped trace (layers + transitions) for ANY MNISTNet on x.
+
+    x: a [1, 1, 28, 28] tensor. Used by the Train tab to render the current,
+    mid-training model's forward pass on a fixed sample — same shape the frontend
+    already knows how to draw. Manual forward (no hooks) so it works on any model.
+    """
+    with torch.no_grad():
+        xf = x.view(1, -1)
+        z1 = model.hidden_1(xf); h1 = F.relu(z1)
+        z2 = model.hidden_2(h1); h2 = F.relu(z2)
+        logits = model.output(h2); probs = F.softmax(logits, dim=1)
+
+    inp, h1s, h2s = xf.squeeze(0), h1.squeeze(0), h2.squeeze(0)
+    z1s, z2s, logits_s, probs_s = z1.squeeze(0), z2.squeeze(0), logits.squeeze(0), probs.squeeze(0)
+    return {
+        "prediction": int(probs_s.argmax().item()),
+        "probs": [round(p, 5) for p in probs_s.tolist()],
+        "layers": [
+            _layer_payload("input", inp, shape=[28, 28]),
+            _layer_payload("hidden_1", h1s, preacts=z1s),
+            _layer_payload("hidden_2", h2s, preacts=z2s),
+            _layer_payload("output", probs_s, logits=logits_s),
+        ],
+        "transitions": [
+            _top_edges("input", "hidden_1", inp, model.hidden_1.weight),
+            _top_edges("hidden_1", "hidden_2", h1s, model.hidden_2.weight),
+            _top_edges("hidden_2", "output", h2s, model.output.weight),
+        ],
+    }
 
 
 def _edge(from_: str, to: str, src: int, dst: int, signed: float, max_v: float):

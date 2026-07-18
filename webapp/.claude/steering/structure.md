@@ -7,16 +7,17 @@ webapp/
 ├── README.md                  public-facing docs + API contract
 ├── CLAUDE.md                  project guide (imports the steering trio)
 ├── .claude/steering/          product.md · tech.md · structure.md
-├── backend/                   FastAPI + PyTorch inference service
-│   ├── app.py                 HTTP: POST /inference · /explain · /neuron, GET /health, CORS
+├── backend/                   FastAPI + PyTorch inference + live-training service
+│   ├── app.py                 HTTP: POST /inference · /explain · /neuron, GET /health · /train (SSE), CORS
 │   ├── inference.py           Predictor: forward hooks, top paths, class-trace, neuron breakdown
+│   ├── training.py            live training: fresh model on an MNIST subset, yields per-batch metrics
 │   ├── model.py               MNISTNet (784→512→512→10) + LAYER_NAMES
 │   ├── train.py               one-shot training → mnist.pth
 │   ├── mnist.pth              committed trained weights (~97.9% val acc)
 │   ├── requirements.txt       pinned deps (CPU torch)
 │   ├── requirements-dev.txt   test deps (pytest, httpx)
 │   ├── pytest.ini
-│   ├── tests/                 test_model · test_inference · test_app · test_explain · test_neuron
+│   ├── tests/                 test_model · test_inference · test_app · test_explain · test_neuron · test_training
 │   └── Dockerfile
 └── frontend/                  React + Vite + Canvas
     ├── index.html · vite.config.js · package.json · nginx.conf · Dockerfile
@@ -31,15 +32,29 @@ webapp/
         │   │                         activation-fn info, preprocess morph, softmax moment
         │   ├── Controls.jsx          play/pause/step/speed (pure view of the anim hook)
         │   ├── ContributorPanel.jsx  plain-language "why this digit?" summary
-        │   └── NeuronInspector.jsx   weight image (hidden_1) + weighted-sum math for a neuron
+        │   ├── NeuronInspector.jsx   weight image (hidden_1) + weighted-sum math for a neuron
+        │   ├── LegendItem.jsx        legend key + clickable info popover
+        │   └── TrainingPanel.jsx     "Watch it learn" tab: controls + live loss chart (SSE)
         ├── hooks/
         │   └── useAnimation.js  the Animation Controller (progress 0→4, + snapToEnd for Live)
         └── lib/
             ├── preprocess.js    normalize() → { input, geometry, inkCanvas }; canvasToInput wrapper
-            ├── inspect.js       pure helpers: positions, hitTest, describeNeuron, LAYER_INFO,
-            │                    reluNormalizedPoint, region/runner-up, hitInfoBand
-            └── api.js           runInference() · runExplain() · runNeuron() fetch wrappers
+            ├── inspect.js       pure helpers: positions, hitTest, describeNeuron, LAYER_INFO, region/runner-up
+            ├── model.js         in-browser inference (predict/explain/neuron) — port of inference.py
+            └── api.js           runInference/runExplain/runNeuron → model.js; openTrainStream → backend
 ```
+
+## Deployment: static, client-side inference
+The public "Watch it think" app runs **entirely in the browser** — no backend.
+`frontend/src/lib/model.js` is a faithful JS port of `inference.py` that loads the
+weights (`backend/export_weights.py` → `frontend/public/model/weights.f32`, a flat
+float32 blob) and produces the same trace shapes. `model.test.js` proves JS↔Python
+parity against a backend-generated fixture (`parity.fixture.json`). This makes the
+app a pure static site (Vite `base` from `VITE_BASE`), deployed to GitHub Pages by
+`.github/workflows/deploy.yml`; `.github/workflows/ci.yml` runs both test suites.
+The FastAPI backend is still used for the (hidden) training tab and local dev.
+**If you change `inference.py` or the model, re-run `export_weights.py`, keep
+`model.js` in sync, and regenerate the parity fixture.**
 
 ## The shared contract (the spine of the system)
 Backend and frontend are decoupled in code but coupled by two things. Change
@@ -110,6 +125,28 @@ are the strongest `weight × value` inputs; `weightImage` (784) is present only 
   the `/inference` trace.
 - **Neuron inspector vs. class trace** are mutually exclusive panels (clicking one
   clears the other).
+
+## Training mode ("Watch it learn" tab)
+- `App.mode` toggles between the inference view and `TrainingPanel`.
+- **`GET /train` (Server-Sent Events)** — query params `lr`, `batch_size`, `epochs`.
+  Streams one `data:` event per batch: `{ step, epoch, totalSteps, loss, trainAcc,
+  validAcc|null }`, then a `{done}` or `{diverged}` event. `training.py` trains a
+  **fresh** MNISTNet with plain SGD on a small MNIST subset (`TRAIN_SUBSET`/
+  `VALID_SUBSET`) — the committed `mnist.pth` is never touched.
+- `training.iter_metrics(train_set, valid_set, ...)` takes datasets as args so it's
+  testable with a synthetic dataset (no download); `training.run()` wires in the
+  cached real subset. Non-finite loss → a `diverged` event (the high-LR lesson).
+- At snapshot steps the stream also carries: `templates` (12 hidden_1 weight
+  images), `sampleTrace` (a fixed digit's forward pass through the CURRENT model —
+  same shape as `/inference`, via `inference.forward_trace`), and `learning`
+  (per-neuron gradient norms + top weight-update edges).
+- Frontend: `openTrainStream()` opens the `EventSource`; `TrainingPanel` draws the
+  live loss curve, the weight-template grid, and `TrainNetworkView` — a live
+  network with a toggle: **Activations** (the sample forward pass, teal) and
+  **Learning** (gradient magnitudes, amber). `TrainNetworkView` reuses
+  `computePositions` but is its own focused renderer (no inference interactivity).
+- Still planned: the single-step backprop teardown (forward → loss → reverse
+  gradient sweep → update).
 
 ## Backend layering (strict, keep it this way)
 ```

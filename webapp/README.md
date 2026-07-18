@@ -1,3 +1,13 @@
+---
+title: Watch a Neural Network Think
+emoji: 🧠
+colorFrom: blue
+colorTo: indigo
+sdk: docker
+app_port: 7860
+pinned: false
+---
+
 # Watch a Neural Network Think
 
 An interactive visualizer for the Lab 1 MNIST network. Draw a digit; it's
