@@ -8,7 +8,6 @@ import {
   describeInputRegion,
   runnerUp,
   reluNormalizedPoint,
-  hitInfoBand,
   LAYER_INFO,
 } from "./inspect.js";
 
@@ -166,27 +165,6 @@ describe("reluNormalizedPoint", () => {
   it("clamps values beyond the display range to [0,1]", () => {
     expect(reluNormalizedPoint(100, 6)).toEqual({ x: 1, y: 1 });
     expect(reluNormalizedPoint(-100, 6)).toEqual({ x: 0, y: 0 });
-  });
-});
-
-describe("hitInfoBand", () => {
-  it("returns null below the header/glyph band", () => {
-    expect(hitInfoBand(141, 200)).toBeNull(); // well into the input grid
-  });
-
-  it("returns null in the gaps between layer columns", () => {
-    expect(hitInfoBand(300, 30)).toBeNull(); // between input and hidden_1 headers
-  });
-
-  it("identifies each layer column by its header center", () => {
-    expect(hitInfoBand(141, 26).layer).toBe(COL.input);
-    expect(hitInfoBand(408, 26).layer).toBe(COL.hidden_1);
-    expect(hitInfoBand(649, 26).layer).toBe(COL.hidden_2);
-    expect(hitInfoBand(862, 26).layer).toBe(COL.output);
-  });
-
-  it("returns the column center for tooltip positioning", () => {
-    expect(hitInfoBand(410, 30).cx).toBe(408);
   });
 });
 

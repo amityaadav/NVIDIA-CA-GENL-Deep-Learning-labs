@@ -134,54 +134,48 @@ export function reluNormalizedPoint(z, zMax = 6) {
  */
 export const LAYER_INFO = {
   input: {
-    title: "Input layer · raw pixels",
+    title: "Input layer · the drawing",
     body:
-      "The drawing itself: a 28×28 grid = 784 pixels, each a brightness value " +
-      "from 0 (blank) to 1 (full ink). No activation function — the intensity " +
-      "IS the signal, passed to Hidden 1 through weighted connections.",
+      "Your drawing turned into numbers: a 28×28 grid of 784 pixels, each a " +
+      "brightness from 0 (blank) to 1 (full ink). This layer has no activation " +
+      "function — the pixel values are fed straight into Hidden 1 through weighted " +
+      "connections. A brighter pixel simply sends a stronger signal.",
   },
   hidden_1: {
     title: "Hidden layer 1 · ReLU",
     body:
-      "512 nodes. Each takes a weighted sum of all 784 inputs, then applies " +
-      "ReLU: max(0, z) — keep positive signals, zero out negatives. ReLU adds " +
-      "non-linearity so the network can learn complex, curved patterns; it's " +
-      "cheap to compute and makes activations sparse (many nodes go quiet).",
+      "512 neurons that each hunt for a simple visual feature (an edge, a stroke, " +
+      "a curve). A neuron multiplies every one of the 784 pixels by a learned " +
+      "weight, adds them up (a 'weighted sum'), then runs the result through its " +
+      "activation function, ReLU.\n\n" +
+      "ReLU (Rectified Linear Unit) is just max(0, z): if that sum is negative the " +
+      "neuron outputs 0 and stays silent; if positive, it passes the value through " +
+      "unchanged. That simple bend at zero is what lets the network learn curved, " +
+      "complex shapes — without a non-linear step like this, stacking layers would " +
+      "be no more powerful than a single straight-line equation.",
   },
   hidden_2: {
     title: "Hidden layer 2 · ReLU",
     body:
-      "512 nodes. Same operation as Hidden 1, but reading Hidden 1's outputs — " +
-      "so it composes simple features into higher-level ones. ReLU again: max(0, z).",
+      "Another 512 neurons, working exactly like Hidden 1 (weighted sum → ReLU), " +
+      "except their inputs are Hidden 1's outputs instead of raw pixels. So this " +
+      "layer combines simple features into higher-level ones — strokes and edges " +
+      "becoming loops, curves, and whole parts of digits. Activation function is " +
+      "again ReLU: max(0, z), keep positives, zero out negatives.",
   },
   output: {
     title: "Output layer · softmax",
     body:
-      "10 nodes, one per digit 0–9. Softmax turns the raw scores (logits) into " +
-      "probabilities that are all positive and sum to 100%, so they read as " +
-      "confidence. The largest is the prediction.",
+      "10 neurons, one per digit 0–9. Each first produces a raw score called a " +
+      "'logit' (a weighted sum of Hidden 2's outputs) — these can be any value, " +
+      "positive or negative, and don't add up to anything meaningful on their own.\n\n" +
+      "Softmax turns those 10 scores into probabilities: it exponentiates each one " +
+      "and divides by their total, so every output becomes positive and all 10 sum " +
+      "to 100%. That's what lets you read them as confidence and compare them — the " +
+      "highest is the network's prediction.",
   },
 };
 
-// Header/glyph hover zone: a band across the top of each layer's column.
-const INFO_CENTERS = [141, 408, 649, 862]; // compartment centers (match headers)
-const INFO_HALF_W = 95;
-const INFO_Y_TOP = 12;
-const INFO_Y_BOTTOM = 54;
-
-/**
- * Hit-test the layer header/glyph band. Returns { layer, cx } when (lx, ly) is
- * over a layer's header/activation area, else null — used to show LAYER_INFO.
- */
-export function hitInfoBand(lx, ly) {
-  if (ly < INFO_Y_TOP || ly > INFO_Y_BOTTOM) return null;
-  for (let L = 0; L < INFO_CENTERS.length; L++) {
-    if (Math.abs(lx - INFO_CENTERS[L]) <= INFO_HALF_W) {
-      return { layer: L, cx: INFO_CENTERS[L] };
-    }
-  }
-  return null;
-}
 
 /**
  * Describe where a set of input-pixel indices (row-major 28x28) is concentrated,

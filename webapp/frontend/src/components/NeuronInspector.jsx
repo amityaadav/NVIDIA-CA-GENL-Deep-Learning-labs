@@ -18,19 +18,38 @@ export default function NeuronInspector({ data, loading, onClose }) {
     canvas.width = N * cell;
     canvas.height = N * cell;
     const ctx = canvas.getContext("2d");
-    ctx.fillStyle = "#0b0f14";
-    ctx.fillRect(0, 0, N * cell, N * cell);
     const w = data.weightImage;
     let maxAbs = 0;
     for (const v of w) maxAbs = Math.max(maxAbs, Math.abs(v));
     maxAbs = maxAbs || 1;
-    for (let i = 0; i < w.length; i++) {
-      const mag = Math.abs(w[i]) / maxAbs;
-      if (mag < 0.03) continue;
-      const [r, g, b] = w[i] >= 0 ? EXCITE : INHIBIT;
-      ctx.fillStyle = `rgba(${r},${g},${b},${mag})`;
-      ctx.fillRect((i % N) * cell, ((i / N) | 0) * cell, cell, cell);
-    }
+
+    // "Develop" the template with a top-down wipe + a scan line, so it feels
+    // like the neuron's receptive field is being revealed.
+    let raf = 0;
+    const start = performance.now();
+    const DURATION = 650;
+    const render = (now) => {
+      const t = Math.min(1, (now - start) / DURATION);
+      const revealRows = t * N;
+      ctx.fillStyle = "#0b0f14";
+      ctx.fillRect(0, 0, N * cell, N * cell);
+      for (let i = 0; i < w.length; i++) {
+        const r = (i / N) | 0;
+        if (r > revealRows) continue;
+        const mag = Math.abs(w[i]) / maxAbs;
+        if (mag < 0.03) continue;
+        const [rr, gg, bb] = w[i] >= 0 ? EXCITE : INHIBIT;
+        ctx.fillStyle = `rgba(${rr},${gg},${bb},${mag})`;
+        ctx.fillRect((i % N) * cell, r * cell, cell, cell);
+      }
+      if (t < 1) {
+        ctx.fillStyle = "rgba(150,240,250,0.6)";
+        ctx.fillRect(0, revealRows * cell, N * cell, 1.5);
+        raf = requestAnimationFrame(render);
+      }
+    };
+    raf = requestAnimationFrame(render);
+    return () => cancelAnimationFrame(raf);
   }, [data]);
 
   if (loading) return <div className="inspector">Inspecting neuron…</div>;

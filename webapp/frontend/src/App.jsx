@@ -4,6 +4,7 @@ import NetworkView from "./components/NetworkView.jsx";
 import Controls from "./components/Controls.jsx";
 import ContributorPanel from "./components/ContributorPanel.jsx";
 import NeuronInspector from "./components/NeuronInspector.jsx";
+import LegendItem from "./components/LegendItem.jsx";
 import { useAnimation } from "./hooks/useAnimation.js";
 import { canvasToInput, normalize } from "./lib/preprocess.js";
 import { runInference, runExplain, runNeuron } from "./lib/api.js";
@@ -34,22 +35,23 @@ export default function App() {
   // Animate the crop -> scale -> center normalization, then run `then`.
   const playPreprocess = useCallback((geometry, inkCanvas, then) => {
     cancelPreprocess();
-    // Morph runs in the first ~36% (see MORPH_FRAC in drawPreprocess); the rest
-    // is a hold so the stacked step captions stay readable for a few seconds.
-    const DURATION = 4200;
+    // Morph runs in the first half; the rest finishes striking through the step
+    // list. Paced slowly so it's readable. When done, the struck captions persist
+    // (prep.persisted) below the grid while the forward pass plays — they don't vanish.
+    const DURATION = 4800;
     const start = performance.now();
     const tick = (now) => {
       const t = Math.min(1, (now - start) / DURATION);
-      setPrep({ geometry, inkCanvas, t });
       if (t < 1) {
+        setPrep({ geometry, inkCanvas, t, persisted: false });
         prepRafRef.current = requestAnimationFrame(tick);
       } else {
         prepRafRef.current = 0;
-        setPrep(null);
+        setPrep({ geometry, inkCanvas, t: 1, persisted: true });
         then?.();
       }
     };
-    setPrep({ geometry, inkCanvas, t: 0 });
+    setPrep({ geometry, inkCanvas, t: 0, persisted: false });
     prepRafRef.current = requestAnimationFrame(tick);
   }, [cancelPreprocess]);
 
@@ -88,6 +90,8 @@ export default function App() {
     const pixels = canvasToInput(canvas);
     if (!pixels) return;
     pixelsRef.current = pixels;
+    cancelPreprocess();
+    setPrep(null); // live mode skips the normalization captions
     setFocus(null);
     setInspect(null);
     try {
@@ -98,7 +102,7 @@ export default function App() {
     } catch {
       /* stay quiet during live drawing */
     }
-  }, [snapToEnd]);
+  }, [snapToEnd, cancelPreprocess]);
 
   const handleStrokeEnd = useCallback(() => {
     if (live) runSnap();
@@ -172,6 +176,20 @@ export default function App() {
     return () => window.removeEventListener("keydown", onKey);
   }, [handleRun, handleClear]);
 
+  // Total connections in the fully-connected net vs. how many we actually draw
+  // (only the strongest few per layer — see TOP_EDGES_PER_TRANSITION).
+  const totalConnections = trace
+    ? trace.layers[0].size * trace.layers[1].size +
+      trace.layers[1].size * trace.layers[2].size +
+      trace.layers[2].size * trace.layers[3].size
+    : 0;
+  const shownConnections = trace
+    ? trace.transitions.reduce((n, t) => n + t.links.length, 0)
+    : 0;
+  const layerSizes = trace ? trace.layers.map((l) => l.size) : [];
+  const perTransition = trace ? trace.transitions.map((t) => t.links.length) : [];
+  const shownPct = totalConnections ? (shownConnections / totalConnections) * 100 : 0;
+
   return (
     <div className="app">
       <header className="app-header">
@@ -216,6 +234,73 @@ export default function App() {
 
         <section className="panel viz-panel">
           <h2>2 · Watch the forward pass</h2>
+          <div className="legend-bar">
+            <LegendItem dotClass="excite" label="excitatory path" title="Excitatory connection (teal)">
+              A connection whose signal <strong>pushes the next neuron up</strong>. On this
+              drawing its contribution — the source neuron's activation multiplied by the
+              connection's weight — is <strong>positive</strong>, so it's evidence <em>for</em>
+              the neuron it feeds (and ultimately for a digit). Brighter and thicker lines mean
+              a larger contribution. Because a neuron's inputs are never negative (pixels and
+              post-ReLU activations are ≥ 0), the sign is simply the sign of the weight.
+            </LegendItem>
+            <LegendItem dotClass="inhibit" label="inhibitory path" title="Inhibitory connection (orange)">
+              A connection whose signal <strong>pushes the next neuron down</strong>. Its
+              contribution (activation × weight) is <strong>negative</strong> here — evidence
+              <em> against</em> the neuron it feeds. Brighter/thicker means more strongly negative.
+              In the output layer these are the connections voting to <em>rule a digit out</em>;
+              in the first layer most of the strongest connections are inhibitory, because ink
+              landing on a spot contradicts the many neurons that expect it blank.
+            </LegendItem>
+            <LegendItem dotClass="dead" label="dead neuron (ReLU → 0)" title="Dead neuron">
+              A hidden neuron whose weighted sum (its pre-activation <em>z</em>) came out ≤ 0.
+              ReLU — <strong>max(0, z)</strong> — clamps that to exactly <strong>0</strong>, so
+              the neuron outputs nothing and passes no signal onward for this input. Shown as a
+              small dim dot. This is normal and common: on a typical digit <em>most</em> hidden
+              neurons are dead (the network is "sparse"), and precisely which ones fire is what
+              encodes the pattern.
+            </LegendItem>
+            <span className="muted">Node brightness = activation · click any ⓘ to learn more</span>
+            {trace && (
+              <LegendItem
+                className="conn-count"
+                title="Why only the strongest connections?"
+                ariaLabel="Why only the strongest connections are shown"
+                label={
+                  <>
+                    Showing {shownConnections.toLocaleString()} of{" "}
+                    {totalConnections.toLocaleString()} connections (strongest only)
+                  </>
+                }
+              >
+                <p>
+                  This network is <strong>fully connected</strong> — every neuron links to every
+                  neuron in the next layer. That is a lot of wires:
+                </p>
+                <p className="legend-math">
+                  input → hidden 1: {layerSizes[0]} × {layerSizes[1]} ={" "}
+                  {(layerSizes[0] * layerSizes[1]).toLocaleString()}<br />
+                  hidden 1 → hidden 2: {layerSizes[1]} × {layerSizes[2]} ={" "}
+                  {(layerSizes[1] * layerSizes[2]).toLocaleString()}<br />
+                  hidden 2 → output: {layerSizes[2]} × {layerSizes[3]} ={" "}
+                  {(layerSizes[2] * layerSizes[3]).toLocaleString()}<br />
+                  <strong>total = {totalConnections.toLocaleString()}</strong>
+                </p>
+                <p>
+                  Drawing all {totalConnections.toLocaleString()} lines is an unreadable hairball
+                  (and slow to render every frame). So we keep only the{" "}
+                  <strong>{perTransition[0]} strongest</strong> connections in each of the 3
+                  transitions — {perTransition.join(" + ")} ={" "}
+                  <strong>{shownConnections}</strong>, about {shownPct.toFixed(3)}% of them.
+                </p>
+                <p>
+                  "Strongest" is judged per drawing: a connection's contribution is{" "}
+                  <strong>source activation × weight</strong>, and we rank by absolute value
+                  (keeping both excitatory and inhibitory). So the visible web reflects where the
+                  signal actually flows for <em>your</em> digit — it changes every time you draw.
+                </p>
+              </LegendItem>
+            )}
+          </div>
           <NetworkView
             trace={trace}
             progress={anim.progress}
@@ -242,13 +327,6 @@ export default function App() {
           )}
         </section>
       </main>
-
-      <footer className="app-footer">
-        <span className="legend"><i className="dot excite" /> excitatory path</span>
-        <span className="legend"><i className="dot inhibit" /> inhibitory path</span>
-        <span className="legend"><i className="dot dead" /> dead neuron (ReLU → 0)</span>
-        <span className="muted">Node brightness = activation. Hover a neuron to see its z → a on the curve.</span>
-      </footer>
     </div>
   );
 }

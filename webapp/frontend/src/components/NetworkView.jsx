@@ -7,7 +7,6 @@ import {
   H,
   computePositions,
   hitTest,
-  hitInfoBand,
   describeNeuron,
   reluNormalizedPoint,
 } from "../lib/inspect.js";
@@ -26,7 +25,6 @@ const GLYPHS = [
   { cx: 862, kind: "softmax" },  // output
 ];
 const GW = 62, GH = 18, GY = 32; // glyph box: width, height, top y
-const INFO_TIP_Y = 58; // logical y where a layer's info tooltip anchors (below glyph)
 const INFO_TIP_W = 300; // fixed CSS px width of the info tooltip (matches .info-tip)
 
 const clamp01 = (v) => (v < 0 ? 0 : v > 1 ? 1 : v);
@@ -41,8 +39,10 @@ const rgba = ([r, g, b], a) => `rgba(${r},${g},${b},${a})`;
 export default function NetworkView({ trace, progress, focus, prep, onPickOutput, onInspect }) {
   const canvasRef = useRef(null);
   const positions = useMemo(computePositions, []);
+  const infoIconsRef = useRef([]); // clickable info-icon hitboxes, filled by draw()
   const [hovered, setHovered] = useState(null);
-  const [info, setInfo] = useState(null); // hovered layer header/glyph explanation
+  const [info, setInfo] = useState(null); // clicked layer explanation { layer, px, py }
+  const [overIcon, setOverIcon] = useState(false);
 
   // Precompute the focused sub-network as fast membership sets per layer.
   const focusSets = useMemo(() => {
@@ -66,8 +66,8 @@ export default function NetworkView({ trace, progress, focus, prep, onPickOutput
     canvas.height = H * dpr;
     const ctx = canvas.getContext("2d");
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    draw(ctx, positions, trace, progress, hovered, focusSets, prep);
-  }, [positions, trace, progress, hovered, focusSets, prep]);
+    draw(ctx, positions, trace, progress, hovered, focusSets, prep, infoIconsRef.current, info?.layer ?? null);
+  }, [positions, trace, progress, hovered, focusSets, prep, info]);
 
   const toLogical = (e) => {
     const rect = canvasRef.current.getBoundingClientRect();
@@ -78,26 +78,20 @@ export default function NetworkView({ trace, progress, focus, prep, onPickOutput
     };
   };
 
+  const iconAt = (lx, ly) =>
+    infoIconsRef.current.find((ic) => Math.hypot(lx - ic.x, ly - ic.y) <= ic.r + 4) || null;
+
   const onMove = (e) => {
     const { rect, lx, ly } = toLogical(e);
 
-    // Header/glyph band shows the layer explanation (works even before a draw).
-    const band = hitInfoBand(lx, ly);
-    if (band) {
-      // Clamp the (fixed-width, centered) tooltip so an edge column's box stays
-      // fully on-stage and wraps the same way a middle column's does.
-      const half = INFO_TIP_W / 2, pad = 10;
-      const minL = half + pad, maxL = rect.width - half - pad;
-      const center = (band.cx / W) * rect.width;
-      band.px = maxL > minL ? Math.max(minL, Math.min(maxL, center)) : rect.width / 2;
-      band.py = (INFO_TIP_Y / H) * rect.height;
-      setInfo(band);
+    // Cursor feedback when over a clickable info icon.
+    const on = !!iconAt(lx, ly);
+    setOverIcon((prev) => (prev === on ? prev : on));
+
+    if (!trace) {
       if (hovered) setHovered(null);
       return;
     }
-    if (info) setInfo(null);
-
-    if (!trace) return;
     const hit = hitTest(positions, lx, ly);
     if (!hit) {
       setHovered((h) => (h ? null : h));
@@ -111,14 +105,31 @@ export default function NetworkView({ trace, progress, focus, prep, onPickOutput
 
   const onLeave = () => {
     setHovered(null);
-    setInfo(null);
+    setOverIcon(false);
   };
 
-  // Click an output digit to trace it; click a hidden neuron to inspect it;
-  // click empty space to clear both.
+  // Click an info icon to toggle its layer explanation; an output digit to
+  // trace it; a hidden neuron to inspect it; empty space clears.
   const onClick = (e) => {
+    const { rect, lx, ly } = toLogical(e);
+
+    const ic = iconAt(lx, ly);
+    if (ic) {
+      setInfo((cur) => {
+        if (cur && cur.layer === ic.layer) return null; // toggle off
+        // Fixed-width tooltip centered on the icon, clamped fully on-stage.
+        const half = INFO_TIP_W / 2, pad = 10;
+        const minL = half + pad, maxL = rect.width - half - pad;
+        const center = (ic.x / W) * rect.width;
+        const px = maxL > minL ? Math.max(minL, Math.min(maxL, center)) : rect.width / 2;
+        const py = (ic.y / H) * rect.height + 14;
+        return { layer: ic.layer, px, py };
+      });
+      return;
+    }
+
+    setInfo(null); // click away closes the explanation
     if (!trace) return;
-    const { lx, ly } = toLogical(e);
     const hit = hitTest(positions, lx, ly);
     if (hit && hit.layer === COL.output) {
       onPickOutput?.(hit.index);
@@ -133,7 +144,7 @@ export default function NetworkView({ trace, progress, focus, prep, onPickOutput
   const tip = hovered && trace ? describeNeuron(trace, hovered) : null;
   const infoTip = info ? LAYER_INFO[LAYER_KEYS[info.layer]] : null;
   const clickable = hovered && (hovered.layer === COL.output || hovered.layer === COL.hidden_1 || hovered.layer === COL.hidden_2);
-  const cursor = info ? "help" : clickable ? "pointer" : "crosshair";
+  const cursor = overIcon || clickable ? "pointer" : "crosshair";
 
   return (
     <div className="network-stage">
@@ -162,15 +173,12 @@ export default function NetworkView({ trace, progress, focus, prep, onPickOutput
   );
 }
 
-function draw(ctx, positions, trace, progress, hovered, focus, prep) {
+function draw(ctx, positions, trace, progress, hovered, focus, prep, icons, infoLayer) {
   ctx.clearRect(0, 0, W, H);
   ctx.fillStyle = "#0b0f14";
   ctx.fillRect(0, 0, W, H);
 
-  // Column headers.
-  ctx.textAlign = "center";
-  ctx.font = "600 12px ui-monospace, monospace";
-  ctx.fillStyle = "#5c6f7e";
+  // Column headers, each with a clickable info icon whose hitbox is recorded.
   // x's are the centers of each layer's compartment (between the separators at
   // 282/533/765, bounded by the canvas edges) so headers sit centered in-column.
   const heads = [
@@ -179,7 +187,18 @@ function draw(ctx, positions, trace, progress, hovered, focus, prep) {
     ["HIDDEN 2 · 512 nodes · ReLU", 649],
     ["OUTPUT · 10 · softmax", 862],
   ];
-  for (const [label, x] of heads) ctx.fillText(label, x, 26);
+  if (icons) icons.length = 0;
+  heads.forEach(([label, x], L) => {
+    ctx.textAlign = "center";
+    ctx.textBaseline = "alphabetic";
+    ctx.font = "600 12px ui-monospace, monospace";
+    ctx.fillStyle = "#5c6f7e";
+    ctx.fillText(label, x, 26);
+    const ix = x + ctx.measureText(label).width / 2 + 11; // superscript, after the text
+    const iy = 18;
+    drawInfoIcon(ctx, ix, iy, infoLayer === L);
+    if (icons) icons.push({ layer: L, x: ix, y: iy, r: 7 });
+  });
 
   // Structural scaffolding, always visible: dividers between the four layers,
   // the full 28x28 input grid, and each layer's activation-function glyph.
@@ -194,9 +213,11 @@ function draw(ctx, positions, trace, progress, hovered, focus, prep) {
     return;
   }
 
-  // Normalization morph plays in the input area before the forward pass.
-  if (prep) {
-    drawPreprocess(ctx, positions, prep);
+  // Normalization morph plays in the input area before the forward pass; once
+  // done, its struck-through step list persists (drawn in the normal path below).
+  if (prep && !prep.persisted) {
+    drawPreprocessMorph(ctx, positions, prep);
+    drawNormalizeCaptions(ctx, positions, prep.t);
     return;
   }
 
@@ -242,15 +263,23 @@ function draw(ctx, positions, trace, progress, hovered, focus, prep) {
         ctx.moveTo(a.x, a.y);
         ctx.lineTo(b.x, b.y);
         ctx.stroke();
-        // Bright signal head travelling from source to destination.
-        const hx = lerp(a.x, b.x, tv);
-        const hy = lerp(a.y, b.y, tv);
-        ctx.strokeStyle = rgba(color, clamp01((0.25 + s * 0.6) * (tv < 1 ? 1 : 0.7) * em));
-        ctx.lineWidth = (0.6 + s * 2.2) * (em > 1 ? 1.5 : 1);
-        ctx.beginPath();
-        ctx.moveTo(a.x, a.y);
-        ctx.lineTo(hx, hy);
-        ctx.stroke();
+        // A stream of pulses flowing source -> destination; stronger edges carry
+        // more of them. The trail spacing shrinks to 0 as the signal lands
+        // (tv -> 1) so every pulse arrives at the destination — none left
+        // suspended mid-edge when the transition completes.
+        const nP = s > 0.5 ? 3 : s > 0.2 ? 2 : 1;
+        const rad = (0.8 + s * 1.6) * (em > 1 ? 1.4 : 1);
+        for (let j = 0; j < nP; j++) {
+          const pf = tv - j * 0.16 * (1 - tv);
+          if (pf <= 0) continue;
+          const hx = lerp(a.x, b.x, pf);
+          const hy = lerp(a.y, b.y, pf);
+          const pa = (0.3 + s * 0.6) * (1 - j * 0.28) * (tv < 1 ? 1 : 0.7) * em;
+          ctx.fillStyle = rgba(color, clamp01(pa));
+          ctx.beginPath();
+          ctx.arc(hx, hy, rad, 0, Math.PI * 2);
+          ctx.fill();
+        }
       }
     });
   }
@@ -268,8 +297,9 @@ function draw(ctx, positions, trace, progress, hovered, focus, prep) {
     ctx.fillRect(p.x - p.cell / 2, p.y - p.cell / 2, p.cell - 0.5, p.cell - 0.5);
   }
 
-  // Hidden layers as glowing nodes. Neurons ReLU clipped to zero (pre-activation
-  // <= 0) are drawn as muted "dead" markers so the layer's sparsity shows (C).
+  // Hidden layers as glowing nodes. Neurons charge up (an ease-out "fill" —
+  // weighted-sum accumulation) as the layer reveals; those ReLU clipped to zero
+  // (pre-activation <= 0) are shown as muted "dead" markers.
   for (const name of ["hidden_1", "hidden_2"]) {
     const L = COL[name];
     const layer = trace.layers[L];
@@ -277,6 +307,7 @@ function draw(ctx, positions, trace, progress, hovered, focus, prep) {
     if (lit <= 0) continue;
     const peak = layer.peak || 1;
     const preacts = layer.preacts;
+    const fill = 1 - Math.pow(1 - lit, 2); // accumulation: rush in, settle
     for (let i = 0; i < layer.size; i++) {
       const p = positions[L][i];
       const d = dimFor(name, i);
@@ -287,7 +318,7 @@ function draw(ctx, positions, trace, progress, hovered, focus, prep) {
         ctx.arc(p.x, p.y, 1.35, 0, Math.PI * 2);
         ctx.fill();
       } else {
-        const norm = clamp01(layer.activations[i] / peak) * lit;
+        const norm = clamp01(layer.activations[i] / peak) * fill;
         const col = mix([26, 37, 48], EXCITE, norm);
         ctx.fillStyle = rgba(col, (0.4 + norm * 0.6) * d);
         ctx.beginPath();
@@ -298,6 +329,25 @@ function draw(ctx, positions, trace, progress, hovered, focus, prep) {
   }
 
   drawOutput(ctx, positions, trace, layerLit(3), progress, focus);
+
+  // Winner "commit" connector: a line flicks from the drawing to the chosen digit.
+  if (!focus && trace.layers[3] && progress > 3.4) {
+    const flick = Math.sin(clamp01((progress - 3.4) / 0.6) * Math.PI);
+    if (flick > 0.02) {
+      const inCells = positions[COL.input];
+      const c = inCells[0].cell;
+      const mid = { x: inCells[0].x - c / 2 + 14 * c, y: inCells[0].y - c / 2 + 14 * c };
+      const win = positions[COL.output][trace.prediction];
+      ctx.setLineDash([3, 4]);
+      ctx.strokeStyle = rgba(EXCITE, 0.45 * flick);
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(mid.x, mid.y);
+      ctx.lineTo(win.x, win.y);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+  }
 
   // Ring around the hovered neuron so it's clear what the tooltip refers to.
   if (hovered) {
@@ -311,6 +361,9 @@ function draw(ctx, positions, trace, progress, hovered, focus, prep) {
       ctx.stroke();
     }
   }
+
+  // The normalization step list stays (fully struck through) after the morph.
+  if (prep && prep.persisted) drawNormalizeCaptions(ctx, positions, 1);
 }
 
 function drawOutput(ctx, positions, trace, lit, progress, focus) {
@@ -373,16 +426,30 @@ function drawOutput(ctx, positions, trace, lit, progress, focus) {
     ctx.fillText(label, barX + barW + 8, p.y + 4);
   }
 
-  // Caption naming what the bars represent right now.
-  if (logits && op > 0.02) {
-    ctx.fillStyle = `rgba(140,170,190,${clamp01(op * 3) * 0.85})`;
-    ctx.font = "600 10px ui-monospace, monospace";
-    ctx.textAlign = "center";
-    ctx.fillText(
-      morph < 0.5 ? "raw scores (logits)" : "softmax → probabilities · sum 100%",
-      862, 500,
-    );
-  }
+}
+
+/** Small clickable info icon (superscript after a header): a glowing neon "i". */
+function drawInfoIcon(ctx, x, y, active) {
+  // Dark disc with a neon ring.
+  ctx.beginPath();
+  ctx.arc(x, y, 6, 0, Math.PI * 2);
+  ctx.fillStyle = "rgba(11,15,20,0.9)";
+  ctx.fill();
+  ctx.strokeStyle = active ? "rgba(140,245,255,1)" : "rgba(79,227,238,0.85)";
+  ctx.lineWidth = 1;
+  ctx.stroke();
+  // Neon glowing "i".
+  ctx.save();
+  ctx.shadowColor = "rgba(79,227,238,1)";
+  ctx.shadowBlur = active ? 12 : 8;
+  ctx.fillStyle = active ? "#b7f9ff" : "#5cf0fb";
+  ctx.font = "800 9px ui-monospace, monospace";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText("i", x, y + 0.5);
+  ctx.fillText("i", x, y + 0.5); // double-pass to intensify the glow
+  ctx.restore();
+  ctx.textBaseline = "alphabetic";
 }
 
 /** Vertical dividers separating the four layer columns. */
@@ -416,35 +483,100 @@ function drawActivationGlyphs(ctx, trace, hovered) {
       ctx.lineTo(x0 + GW, GY);     // linear for z > 0
       ctx.stroke();
     } else if (g.kind === "softmax") {
-      const n = 7, gap = 2, bw = (GW - (n - 1) * gap) / n;
-      const hs = [0.18, 0.32, 0.5, 1.0, 0.55, 0.28, 0.14];
-      ctx.fillStyle = "rgba(120,200,210,0.65)";
-      for (let i = 0; i < n; i++) {
-        ctx.fillRect(x0 + i * (bw + gap), base - hs[i] * GH, bw, hs[i] * GH);
+      // The softmax squashing curve: raw scores -> (0, 1). For one class vs. the
+      // rest, softmax reduces exactly to this logistic S-curve.
+      ctx.strokeStyle = "rgba(140,170,190,0.18)";
+      ctx.lineWidth = 0.5;
+      ctx.beginPath(); ctx.moveTo(x0, base); ctx.lineTo(x0 + GW, base); ctx.stroke();
+      ctx.strokeStyle = "rgba(120,200,210,0.75)";
+      ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      const steps = 24;
+      for (let i = 0; i <= steps; i++) {
+        const u = i / steps;
+        const y = 1 / (1 + Math.exp(-(u - 0.5) * 12)); // sigmoid over logit range ~[-6, 6]
+        const px = x0 + u * GW;
+        const py = base - y * GH;
+        if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
       }
+      ctx.stroke();
     } else {
-      ctx.strokeStyle = "rgba(140,170,190,0.4)";
-      ctx.lineWidth = 1;
-      ctx.beginPath(); ctx.moveTo(x0, base); ctx.lineTo(x0 + GW, GY); ctx.stroke(); // identity
+      // Input has no activation function — it's a raw brightness. Show a 0..1
+      // intensity ramp (black -> white) instead of a misleading function curve.
+      const grad = ctx.createLinearGradient(x0, 0, x0 + GW, 0);
+      grad.addColorStop(0, "#0b0f14");
+      grad.addColorStop(1, "#e7edf3");
+      ctx.fillStyle = grad;
+      ctx.fillRect(x0, GY, GW, GH);
+      ctx.strokeStyle = "rgba(140,170,190,0.25)";
+      ctx.lineWidth = 0.5;
+      ctx.strokeRect(x0, GY, GW, GH);
     }
   }
 
-  // (B) Plot the hovered hidden neuron's pre-activation on its ReLU curve.
-  if (trace && hovered && (hovered.layer === COL.hidden_1 || hovered.layer === COL.hidden_2)) {
-    const g = GLYPHS[hovered.layer];
-    const preacts = trace.layers[hovered.layer].preacts;
-    if (preacts) {
-      const pt = reluNormalizedPoint(preacts[hovered.index]);
-      const x0 = g.cx - GW / 2, base = GY + GH;
-      const px = x0 + pt.x * GW;
-      const py = base - pt.y * GH;
+  // (B) When hovering a neuron, mark it on its layer's activation glyph: a point
+  // on the ReLU curve for hidden layers; a probability level on the softmax
+  // distribution for the output.
+  if (trace && hovered) {
+    const L = hovered.layer;
+    const base = GY + GH;
+    const dot = (x, y) => {
+      ctx.fillStyle = "rgba(255,255,255,0.95)";
+      ctx.beginPath();
+      ctx.arc(x, y, 2.4, 0, Math.PI * 2);
+      ctx.fill();
+    };
+    const dash = (x1, y1, x2, y2) => {
       ctx.setLineDash([2, 2]);
       ctx.strokeStyle = "rgba(231,237,243,0.4)";
       ctx.lineWidth = 0.5;
-      ctx.beginPath(); ctx.moveTo(px, base); ctx.lineTo(px, py); ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(x1, y1);
+      ctx.lineTo(x2, y2);
+      ctx.stroke();
       ctx.setLineDash([]);
-      ctx.fillStyle = "rgba(255,255,255,0.95)";
-      ctx.beginPath(); ctx.arc(px, py, 2.4, 0, Math.PI * 2); ctx.fill();
+    };
+
+    if (L === COL.input) {
+      const g = GLYPHS[COL.input];
+      const x0 = g.cx - GW / 2;
+      const v = clamp01(trace.layers[0].activations[hovered.index]); // intensity 0..1
+      const px = x0 + v * GW;
+      ctx.strokeStyle = "rgba(255,255,255,0.95)";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(px, GY - 1);
+      ctx.lineTo(px, base + 1);
+      ctx.stroke();
+      dot(px, GY - 3); // caret above the ramp at this pixel's brightness
+    } else if ((L === COL.hidden_1 || L === COL.hidden_2) && trace.layers[L].preacts) {
+      const g = GLYPHS[L];
+      const pt = reluNormalizedPoint(trace.layers[L].preacts[hovered.index]);
+      const px = g.cx - GW / 2 + pt.x * GW;
+      const py = base - pt.y * GH;
+      dash(px, base, px, py); // vertical drop to the point on the curve
+      dot(px, py);
+    } else if (L === COL.output) {
+      const g = GLYPHS[COL.output];
+      const x0 = g.cx - GW / 2;
+      const logits = trace.layers[COL.output].logits;
+      const prob = clamp01(trace.layers[COL.output].activations[hovered.index]);
+      // softmax_i = sigmoid(logit_i - logsumexp(other logits)). Using that margin
+      // as x places the point exactly ON the S-curve and is exactly accurate.
+      let frac = prob;
+      if (logits) {
+        const i = hovered.index;
+        let m = -Infinity;
+        for (let j = 0; j < logits.length; j++) if (j !== i) m = Math.max(m, logits[j]);
+        let sum = 0;
+        for (let j = 0; j < logits.length; j++) if (j !== i) sum += Math.exp(logits[j] - m);
+        const margin = logits[i] - (m + Math.log(sum));
+        frac = clamp01((margin + 6) / 12);
+      }
+      const px = x0 + frac * GW;
+      const py = base - prob * GH;
+      dash(px, base, px, py); // vertical drop to the point on the curve
+      dot(px, py);
     }
   }
 }
@@ -476,11 +608,10 @@ function drawInputGrid(ctx, positions) {
  * position/size) morphs to the 20px, center-of-mass-centered crop the network
  * actually receives. Ends aligned with the 28x28 grid so it hands off cleanly.
  */
-function drawPreprocess(ctx, positions, prep) {
+/** The ink crop morphing to its normalized 20px/centered placement. */
+function drawPreprocessMorph(ctx, positions, prep) {
   const { geometry: g, inkCanvas, t } = prep;
-  // The geometric morph happens in the first MORPH_FRAC of the timeline; the
-  // remainder holds so the stacked step captions stay readable.
-  const MORPH_FRAC = 0.36;
+  const MORPH_FRAC = 0.5; // morph completes in the first half; strikes finish after
   const mt = clamp01(t / MORPH_FRAC);
   const ease = mt < 0.5 ? 2 * mt * mt : 1 - Math.pow(-2 * mt + 2, 2) / 2; // easeInOutQuad
 
@@ -510,26 +641,54 @@ function drawPreprocess(ctx, positions, prep) {
   ctx.strokeStyle = "rgba(79,227,238,0.7)";
   ctx.lineWidth = 1;
   ctx.strokeRect(rx, ry, rw, rh);
+}
 
-  // Step captions: each distinct line fades in below the previous (scrolling
-  // downward) as its step happens, then all linger through the hold.
+/**
+ * The normalization step list below the grid: a centered heading, then the
+ * monospaced "N · ..." steps (left-aligned as a centered block). `t` (0..1)
+ * drives each step's fade-in and its strikethrough as it completes; pass t=1 to
+ * render the finished, fully-struck list that persists after the morph.
+ */
+function drawNormalizeCaptions(ctx, positions, t) {
+  const cells = positions[COL.input];
+  const cell = cells[0].cell;
+  const gx0 = cells[0].x - cell / 2, gy0 = cells[0].y - cell / 2;
+  const gridMid = gx0 + 14 * cell;
   const baseY = gy0 + 28 * cell + 18;
+
   ctx.textAlign = "center";
   ctx.fillStyle = "rgba(140,170,190,0.9)";
   ctx.font = "600 11px ui-monospace, monospace";
-  ctx.fillText("normalizing input", 121, baseY);
+  ctx.fillText("normalizing input", gridMid, baseY);
 
   const steps = [
-    { at: 0.04, text: "1 · crop to the ink" },
-    { at: 0.16, text: "2 · scale to 20 px" },
-    { at: 0.28, text: "3 · center by mass" },
+    { appear: 0.05, strike: 0.22, text: "1 · crop to the ink" },
+    { appear: 0.25, strike: 0.45, text: "2 · scale to 20 px" },
+    { appear: 0.45, strike: 0.70, text: "3 · center by mass" },
   ];
+  ctx.textAlign = "left";
   ctx.font = "500 11px ui-monospace, monospace";
+  const maxW = Math.max(...steps.map((s) => ctx.measureText(s.text).width));
+  const stepsX = gridMid - maxW / 2;
+  const STRIKE_DUR = 0.12;
+
   steps.forEach((s, i) => {
-    const a = clamp01((t - s.at) / 0.05);
-    if (a <= 0) return;
-    ctx.fillStyle = `rgba(120,200,210,${a})`;
-    ctx.fillText(s.text, 121, baseY + 18 + i * 16);
+    const reveal = clamp01((t - s.appear) / 0.05);
+    if (reveal <= 0) return;
+    const struck = clamp01((t - s.strike) / STRIKE_DUR); // 0 -> 1 as it completes
+    const y = baseY + 18 + i * 16;
+    // Text dims a little as it's checked off.
+    ctx.fillStyle = `rgba(120,200,210,${reveal * (1 - 0.35 * struck)})`;
+    ctx.fillText(s.text, stepsX, y);
+    if (struck > 0) {
+      const w = ctx.measureText(s.text).width;
+      ctx.strokeStyle = `rgba(150,210,220,${0.4 * reveal})`;
+      ctx.lineWidth = 0.8;
+      ctx.beginPath();
+      ctx.moveTo(stepsX, y - 3);
+      ctx.lineTo(stepsX + w * struck, y - 3);
+      ctx.stroke();
+    }
   });
 }
 

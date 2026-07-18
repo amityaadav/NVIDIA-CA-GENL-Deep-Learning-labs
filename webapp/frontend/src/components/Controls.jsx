@@ -1,14 +1,8 @@
-/** Playback controls for the forward-pass animation. */
+/** Speed control for the forward-pass animation (it auto-plays on Run). */
 export default function Controls({ anim, hasTrace }) {
-  const { playing, toggle, stepForward, stepBack, restart, speed, setSpeed } = anim;
+  const { speed, setSpeed } = anim;
   return (
     <div className="controls" role="group" aria-label="Animation controls">
-      <button onClick={stepBack} disabled={!hasTrace} title="Previous layer" aria-label="Previous layer">‹</button>
-      <button className="primary" onClick={toggle} disabled={!hasTrace}>
-        {playing ? "❚❚ Pause" : "▶ Play"}
-      </button>
-      <button onClick={stepForward} disabled={!hasTrace} title="Next layer" aria-label="Next layer">›</button>
-      <button onClick={restart} disabled={!hasTrace} title="Restart" aria-label="Restart">↻</button>
       <label className="speed">
         Speed
         <input
