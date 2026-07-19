@@ -1,20 +1,21 @@
-import { useEffect, useRef, forwardRef, useImperativeHandle } from "react";
+import { useEffect, useRef, useState, forwardRef, useImperativeHandle } from "react";
 
 const SIZE = 280; // display + backing size; multiple of 28 keeps downscaling clean
 
 /**
  * A square canvas the user draws a single digit on with mouse or trackpad.
  * Dark stroke on white so it reads like pen on paper; preprocessing inverts it.
- * Exposes clear() and the underlying canvas via ref.
+ * Shows a hint inside the box while it's blank. Exposes clear() and the canvas.
  */
 const DrawCanvas = forwardRef(function DrawCanvas({ onStrokeEnd }, ref) {
   const canvasRef = useRef(null);
   const drawing = useRef(false);
   const last = useRef({ x: 0, y: 0 });
+  const [blank, setBlank] = useState(true); // toggles the "draw here" hint
 
   useImperativeHandle(ref, () => ({
     canvas: () => canvasRef.current,
-    clear: () => paintBlank(canvasRef.current),
+    clear: () => { paintBlank(canvasRef.current); setBlank(true); },
   }));
 
   useEffect(() => {
@@ -34,6 +35,7 @@ const DrawCanvas = forwardRef(function DrawCanvas({ onStrokeEnd }, ref) {
     e.preventDefault();
     drawing.current = true;
     last.current = posFromEvent(e);
+    if (blank) setBlank(false); // hide the hint once drawing begins
   };
 
   const move = (e) => {
@@ -59,20 +61,23 @@ const DrawCanvas = forwardRef(function DrawCanvas({ onStrokeEnd }, ref) {
   };
 
   return (
-    <canvas
-      ref={canvasRef}
-      width={SIZE}
-      height={SIZE}
-      className="draw-canvas"
-      onMouseDown={start}
-      onMouseMove={move}
-      onMouseUp={end}
-      onMouseLeave={end}
-      onTouchStart={start}
-      onTouchMove={move}
-      onTouchEnd={end}
-      aria-label="Draw a digit from 0 to 9"
-    />
+    <div className="draw-wrap">
+      <canvas
+        ref={canvasRef}
+        width={SIZE}
+        height={SIZE}
+        className="draw-canvas"
+        onMouseDown={start}
+        onMouseMove={move}
+        onMouseUp={end}
+        onMouseLeave={end}
+        onTouchStart={start}
+        onTouchMove={move}
+        onTouchEnd={end}
+        aria-label="Draw a digit from 0 to 9"
+      />
+      {blank && <div className="draw-placeholder">Draw a digit, then run inference</div>}
+    </div>
   );
 });
 

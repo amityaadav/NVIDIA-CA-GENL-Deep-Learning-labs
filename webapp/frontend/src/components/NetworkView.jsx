@@ -3,6 +3,7 @@ import {
   COL,
   LAYER_KEYS,
   LAYER_INFO,
+  NORMALIZE_INFO,
   W,
   H,
   computePositions,
@@ -142,7 +143,9 @@ export default function NetworkView({ trace, progress, focus, prep, onPickOutput
   };
 
   const tip = hovered && trace ? describeNeuron(trace, hovered) : null;
-  const infoTip = info ? LAYER_INFO[LAYER_KEYS[info.layer]] : null;
+  const infoTip = info
+    ? info.layer === "normalize" ? NORMALIZE_INFO : LAYER_INFO[LAYER_KEYS[info.layer]]
+    : null;
   const clickable = hovered && (hovered.layer === COL.output || hovered.layer === COL.hidden_1 || hovered.layer === COL.hidden_2);
   const cursor = overIcon || clickable ? "pointer" : "crosshair";
 
@@ -205,19 +208,16 @@ function draw(ctx, positions, trace, progress, hovered, focus, prep, icons, info
   drawSeparators(ctx);
   drawInputGrid(ctx, positions);
   drawActivationGlyphs(ctx, trace, hovered);
+  drawNormalizeHeader(ctx, positions, icons); // always visible (has its own info icon)
 
-  if (!trace) {
-    ctx.fillStyle = "#3a4a57";
-    ctx.font = "500 15px system-ui, sans-serif";
-    ctx.fillText("Draw a digit, then run inference to watch the forward pass.", W / 2, H / 2);
-    return;
-  }
+  // Fresh / cleared state: show the empty scaffolding, no forward pass yet.
+  if (!trace) return;
 
   // Normalization morph plays in the input area before the forward pass; once
   // done, its struck-through step list persists (drawn in the normal path below).
   if (prep && !prep.persisted) {
     drawPreprocessMorph(ctx, positions, prep);
-    drawNormalizeCaptions(ctx, positions, prep.t);
+    drawNormalizeSteps(ctx, positions, prep.t);
     return;
   }
 
@@ -362,8 +362,8 @@ function draw(ctx, positions, trace, progress, hovered, focus, prep, icons, info
     }
   }
 
-  // The normalization step list stays (fully struck through) after the morph.
-  if (prep && prep.persisted) drawNormalizeCaptions(ctx, positions, 1);
+  // The normalization step list stays (checked off) after the morph.
+  if (prep && prep.persisted) drawNormalizeSteps(ctx, positions, 1);
 }
 
 function drawOutput(ctx, positions, trace, lit, progress, focus) {
@@ -428,27 +428,21 @@ function drawOutput(ctx, positions, trace, lit, progress, focus) {
 
 }
 
-/** Small clickable info icon (superscript after a header): a glowing neon "i". */
+/** Small clickable info icon: a solid cyan disc with a dark "i" (high contrast). */
 function drawInfoIcon(ctx, x, y, active) {
-  // Dark disc with a neon ring.
-  ctx.beginPath();
-  ctx.arc(x, y, 6, 0, Math.PI * 2);
-  ctx.fillStyle = "rgba(11,15,20,0.9)";
-  ctx.fill();
-  ctx.strokeStyle = active ? "rgba(140,245,255,1)" : "rgba(79,227,238,0.85)";
-  ctx.lineWidth = 1;
-  ctx.stroke();
-  // Neon glowing "i".
   ctx.save();
-  ctx.shadowColor = "rgba(79,227,238,1)";
-  ctx.shadowBlur = active ? 12 : 8;
-  ctx.fillStyle = active ? "#b7f9ff" : "#5cf0fb";
-  ctx.font = "800 9px ui-monospace, monospace";
+  ctx.shadowColor = "rgba(79,227,238,0.85)";
+  ctx.shadowBlur = active ? 10 : 6;
+  ctx.beginPath();
+  ctx.arc(x, y, 6.5, 0, Math.PI * 2);
+  ctx.fillStyle = active ? "rgba(150,245,255,1)" : "rgba(79,227,238,1)";
+  ctx.fill();
+  ctx.restore();
+  ctx.fillStyle = "#06131a";
+  ctx.font = "800 10px ui-monospace, monospace";
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   ctx.fillText("i", x, y + 0.5);
-  ctx.fillText("i", x, y + 0.5); // double-pass to intensify the glow
-  ctx.restore();
   ctx.textBaseline = "alphabetic";
 }
 
@@ -649,45 +643,58 @@ function drawPreprocessMorph(ctx, positions, prep) {
  * drives each step's fade-in and its strikethrough as it completes; pass t=1 to
  * render the finished, fully-struck list that persists after the morph.
  */
-function drawNormalizeCaptions(ctx, positions, t) {
+const NORMALIZE_STEPS = [
+  { appear: 0.05, done: 0.20, text: "1 · crop to the ink" },
+  { appear: 0.22, done: 0.40, text: "2 · scale to 20 px" },
+  { appear: 0.42, done: 0.60, text: "3 · center by mass" },
+  { appear: 0.62, done: 0.82, text: "4 · sample to 28×28 px" },
+];
+
+function _normalizeLayout(positions) {
   const cells = positions[COL.input];
   const cell = cells[0].cell;
   const gx0 = cells[0].x - cell / 2, gy0 = cells[0].y - cell / 2;
-  const gridMid = gx0 + 14 * cell;
-  const baseY = gy0 + 28 * cell + 18;
+  return { gridMid: gx0 + 14 * cell, baseY: gy0 + 28 * cell + 22 };
+}
 
+/** The "Normalizing Input" heading + info icon — drawn ALWAYS (even when idle),
+ *  so people can read what normalization means before running. */
+function drawNormalizeHeader(ctx, positions, icons) {
+  const { gridMid, baseY } = _normalizeLayout(positions);
   ctx.textAlign = "center";
+  ctx.textBaseline = "alphabetic";
   ctx.fillStyle = "rgba(140,170,190,0.9)";
-  ctx.font = "600 11px ui-monospace, monospace";
-  ctx.fillText("normalizing input", gridMid, baseY);
+  ctx.font = "600 14px ui-monospace, monospace";
+  ctx.fillText("Normalizing Input", gridMid, baseY);
+  if (icons) {
+    const ix = gridMid + ctx.measureText("Normalizing Input").width / 2 + 12;
+    const iy = baseY - 5;
+    drawInfoIcon(ctx, ix, iy, false);
+    icons.push({ layer: "normalize", x: ix, y: iy, r: 7 });
+  }
+}
 
-  const steps = [
-    { appear: 0.05, strike: 0.22, text: "1 · crop to the ink" },
-    { appear: 0.25, strike: 0.45, text: "2 · scale to 20 px" },
-    { appear: 0.45, strike: 0.70, text: "3 · center by mass" },
-  ];
+/** The step checklist below the heading — only during/after the normalization morph. */
+function drawNormalizeSteps(ctx, positions, t) {
+  const { gridMid, baseY } = _normalizeLayout(positions);
   ctx.textAlign = "left";
   ctx.font = "500 11px ui-monospace, monospace";
-  const maxW = Math.max(...steps.map((s) => ctx.measureText(s.text).width));
+  const maxW = Math.max(...NORMALIZE_STEPS.map((s) => ctx.measureText(s.text).width));
   const stepsX = gridMid - maxW / 2;
-  const STRIKE_DUR = 0.12;
+  const DONE_DUR = 0.12;
 
-  steps.forEach((s, i) => {
+  NORMALIZE_STEPS.forEach((s, i) => {
     const reveal = clamp01((t - s.appear) / 0.05);
     if (reveal <= 0) return;
-    const struck = clamp01((t - s.strike) / STRIKE_DUR); // 0 -> 1 as it completes
-    const y = baseY + 18 + i * 16;
-    // Text dims a little as it's checked off.
-    ctx.fillStyle = `rgba(120,200,210,${reveal * (1 - 0.35 * struck)})`;
+    const done = clamp01((t - s.done) / DONE_DUR); // 0 -> 1 as it completes
+    const y = baseY + 20 + i * 16;
+    ctx.font = "500 11px ui-monospace, monospace";
+    ctx.fillStyle = `rgba(120,200,210,${reveal})`;
     ctx.fillText(s.text, stepsX, y);
-    if (struck > 0) {
-      const w = ctx.measureText(s.text).width;
-      ctx.strokeStyle = `rgba(150,210,220,${0.4 * reveal})`;
-      ctx.lineWidth = 0.8;
-      ctx.beginPath();
-      ctx.moveTo(stepsX, y - 3);
-      ctx.lineTo(stepsX + w * struck, y - 3);
-      ctx.stroke();
+    if (done > 0) {
+      ctx.font = "700 17px ui-monospace, monospace";
+      ctx.fillStyle = `rgba(110,231,183,${done})`;
+      ctx.fillText("✓", stepsX + maxW + 8, y + 1);
     }
   });
 }

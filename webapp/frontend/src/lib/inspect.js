@@ -176,6 +176,17 @@ export const LAYER_INFO = {
   },
 };
 
+/** Explanation for the "Normalizing Input" step (its own info icon). */
+export const NORMALIZE_INFO = {
+  title: "Normalizing input",
+  body:
+    "Before the network sees your drawing, it's reshaped to match how MNIST " +
+    "digits were prepared — skip this and predictions are garbage. Four steps: " +
+    "crop to the ink, scale the longest side to 20px, center it by center-of-mass " +
+    "in a 28×28 field, then sample that into 784 pixel values (0–1). The network " +
+    "only ever sees those 784 numbers — never your actual strokes.",
+};
+
 
 /**
  * Describe where a set of input-pixel indices (row-major 28x28) is concentrated,

@@ -18,6 +18,7 @@ const TRAINING_ENABLED = false;
 
 export default function App() {
   const drawRef = useRef(null);
+  const vizRef = useRef(null); // the "watch the forward pass" section (for mobile scroll)
   const pixelsRef = useRef(null); // last pixels sent, reused for "why this digit?"
   const [trace, setTrace] = useState(null);
   const [status, setStatus] = useState("idle"); // idle | loading | ready | error
@@ -76,6 +77,13 @@ export default function App() {
     setFocus(null);
     setInspect(null);
     cancelPreprocess();
+    // On a stacked (mobile) layout, scroll to the animation so it isn't missed.
+    // matchMedia matches the exact CSS breakpoint; rAF lets layout settle first.
+    if (window.matchMedia("(max-width: 900px)").matches) {
+      requestAnimationFrame(() =>
+        vizRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }),
+      );
+    }
     try {
       const result = await runInference(norm.input);
       setTrace(result);
@@ -184,17 +192,13 @@ export default function App() {
   }, [handleRun, handleClear, mode]);
 
   // Total connections in the fully-connected net vs. how many we actually draw
-  // (only the strongest few per layer — see TOP_EDGES_PER_TRANSITION).
-  const totalConnections = trace
-    ? trace.layers[0].size * trace.layers[1].size +
-      trace.layers[1].size * trace.layers[2].size +
-      trace.layers[2].size * trace.layers[3].size
-    : 0;
-  const shownConnections = trace
-    ? trace.transitions.reduce((n, t) => n + t.links.length, 0)
-    : 0;
-  const layerSizes = trace ? trace.layers.map((l) => l.size) : [];
-  const perTransition = trace ? trace.transitions.map((t) => t.links.length) : [];
+  // (only the strongest ~40 per layer). The architecture is fixed, so these are
+  // known even before a run — the note is always shown.
+  const layerSizes = trace ? trace.layers.map((l) => l.size) : [784, 512, 512, 10];
+  const totalConnections =
+    layerSizes[0] * layerSizes[1] + layerSizes[1] * layerSizes[2] + layerSizes[2] * layerSizes[3];
+  const perTransition = trace ? trace.transitions.map((t) => t.links.length) : [40, 40, 40];
+  const shownConnections = perTransition.reduce((n, k) => n + k, 0);
   const shownPct = totalConnections ? (shownConnections / totalConnections) * 100 : 0;
 
   return (
@@ -263,7 +267,7 @@ export default function App() {
           {status === "error" && <p className="error">{error}</p>}
         </section>
 
-        <section className="panel viz-panel">
+        <section className="panel viz-panel" ref={vizRef}>
           <h2>2 · Watch the forward pass</h2>
           <div className="legend-bar">
             <LegendItem dotClass="excite" label="excitatory path" title="Excitatory connection (teal)">
@@ -291,18 +295,17 @@ export default function App() {
               encodes the pattern.
             </LegendItem>
             <span className="muted">Node brightness = activation · click any ⓘ to learn more</span>
-            {trace && (
-              <LegendItem
-                className="conn-count"
-                title="Why only the strongest connections?"
-                ariaLabel="Why only the strongest connections are shown"
-                label={
-                  <>
-                    Showing {shownConnections.toLocaleString()} of{" "}
-                    {totalConnections.toLocaleString()} connections (strongest only)
-                  </>
-                }
-              >
+            <LegendItem
+              className="conn-count"
+              title="Why only the strongest connections?"
+              ariaLabel="Why only the strongest connections are shown"
+              label={
+                <>
+                  Showing {shownConnections.toLocaleString()} of{" "}
+                  {totalConnections.toLocaleString()} connections (strongest only)
+                </>
+              }
+            >
                 <p>
                   This network is <strong>fully connected</strong> — every neuron links to every
                   neuron in the next layer. That is a lot of wires:
@@ -329,8 +332,7 @@ export default function App() {
                   (keeping both excitatory and inhibitory). So the visible web reflects where the
                   signal actually flows for <em>your</em> digit — it changes every time you draw.
                 </p>
-              </LegendItem>
-            )}
+            </LegendItem>
           </div>
           <NetworkView
             trace={trace}
