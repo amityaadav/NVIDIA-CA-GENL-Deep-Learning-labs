@@ -5,9 +5,13 @@
  */
 import { getModel } from "./model.js";
 
-export async function runInference(pixels) {
+export { getModel };
+
+// `edges` (optional) sets how many top connections per transition to keep; the
+// Connections slider passes a larger value. Omitted → the default (parity) count.
+export async function runInference(pixels, edges) {
   const model = await getModel();
-  return model.predict(pixels);
+  return model.predict(pixels, edges);
 }
 
 /** "Why this digit?" — the backward sub-network that drove output `target`. */

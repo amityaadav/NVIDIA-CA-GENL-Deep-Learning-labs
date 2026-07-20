@@ -55,7 +55,10 @@ export class Model {
     return { input, z1, h1, z2, h2, logits, probs };
   }
 
-  predict(pixels) {
+  // `edges` is the max edges to keep per transition (default matches the
+  // backend/parity fixture). The Connections slider passes a larger value to
+  // reveal more of the fully-connected net.
+  predict(pixels, edges = TOP_EDGES_PER_TRANSITION) {
     const s = this._forward(pixels);
     return {
       prediction: argmax(s.probs),
@@ -67,9 +70,9 @@ export class Model {
         layerPayload("output", s.probs, { logits: s.logits }),
       ],
       transitions: [
-        topEdges("input", "hidden_1", s.input, this.W1, IN, H),
-        topEdges("hidden_1", "hidden_2", s.h1, this.W2, H, H),
-        topEdges("hidden_2", "output", s.h2, this.W3, H, OUT),
+        topEdges("input", "hidden_1", s.input, this.W1, IN, H, edges),
+        topEdges("hidden_1", "hidden_2", s.h1, this.W2, H, H, edges),
+        topEdges("hidden_2", "output", s.h2, this.W3, H, OUT, edges),
       ],
     };
   }
@@ -117,10 +120,21 @@ export class Model {
       contribution: round5(contrib[i]),
     }));
 
+    // The strongest terms are shown individually; everything else is collapsed
+    // into one "rest" figure so the list visibly sums to z (rest = sum of all
+    // contributions minus the shown ones — computed exact, before rounding).
+    let sumAll = 0;
+    for (let i = 0; i < cfg.nSrc; i++) sumAll += contrib[i];
+    let sumTop = 0;
+    for (const i of idx) sumTop += contrib[i];
+
     const result = {
       layer,
       index,
       sourceLayer: cfg.sourceLayer,
+      sourceCount: cfg.nSrc,
+      restCount: cfg.nSrc - idx.length,
+      restContribution: round5(sumAll - sumTop),
       activation: layer === "output" ? "softmax" : "relu",
       bias: round5(bias),
       z: round5(cfg.z[index]),
@@ -187,7 +201,7 @@ function layerPayload(name, values, { shape, preacts, logits } = {}) {
 }
 
 /** Top edges src_i -> dst_j by |weight[j,i] * srcAct[i]|. weight is flat [dst*nSrc + src]. */
-function topEdges(from, to, srcAct, weight, nSrc, nDst) {
+function topEdges(from, to, srcAct, weight, nSrc, nDst, count = TOP_EDGES_PER_TRANSITION) {
   const cands = [];
   for (let i = 0; i < nSrc; i++) {
     const a = srcAct[i];
@@ -198,7 +212,7 @@ function topEdges(from, to, srcAct, weight, nSrc, nDst) {
     }
   }
   cands.sort((x, y) => y.mag - x.mag);
-  const top = cands.slice(0, TOP_EDGES_PER_TRANSITION);
+  const top = cands.slice(0, count);
   const maxV = top.length && top[0].mag > 0 ? top[0].mag : 1;
   return {
     from,

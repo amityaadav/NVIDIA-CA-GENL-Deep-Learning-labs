@@ -8,13 +8,27 @@ import LegendItem from "./components/LegendItem.jsx";
 import TrainingPanel from "./components/TrainingPanel.jsx";
 import { useAnimation } from "./hooks/useAnimation.js";
 import { canvasToInput, normalize } from "./lib/preprocess.js";
-import { runInference, runExplain, runNeuron } from "./lib/api.js";
+import { runInference, runExplain, runNeuron, getModel } from "./lib/api.js";
 
 const PHASES = 4; // input + 2 hidden + output
+
+// Link target for "NVIDIA's Deep Learning Lab 1 on Neural Networks" in the
+// header. Set to the Lab 1 GitLab file URL to render it as a link; null renders
+// the same text plainly (no broken link) until a URL is provided.
+const LAB1_URL = "https://github.com/amityaadav/NVIDIA-Deep-Learning-labs/blob/main/lab1_nn_mnist.py";
 
 // The "Watch it learn" tab is hidden for the public demo (inference only).
 // Flip to true to restore the training tab and its controls.
 const TRAINING_ENABLED = false;
+
+// Connections slider: how many top edges to draw per transition. The log-scaled
+// slider (0→1000) maps to N edges/transition, from the default 40 (120 total,
+// exact-parity view) up to the full fully-connected net. Per-transition caps are
+// nSrc×nDst; when N hits the largest (784×512) every transition is fully drawn,
+// so the total reaches 784·512 + 512·512 + 512·10 = 668,672.
+const EDGE_MIN = 40;
+const EDGE_MAX = 784 * 512; // largest transition; N here => whole net shown
+const sliderToN = (s) => Math.round(EDGE_MIN * Math.pow(EDGE_MAX / EDGE_MIN, s / 1000));
 
 export default function App() {
   const drawRef = useRef(null);
@@ -30,8 +44,20 @@ export default function App() {
   const [prep, setPrep] = useState(null); // { geometry, inkCanvas, t } normalization morph
   const prepRafRef = useRef(0);
   const [mode, setMode] = useState("infer"); // "infer" | "train"
+  const [edgeSlider, setEdgeSlider] = useState(0); // Connections slider position 0→1000
+  const edgeNRef = useRef(EDGE_MIN); // current edges/transition (kept in a ref so runs read it)
+  const modelRef = useRef(null); // cached model, for synchronous slider recompute
 
-  const anim = useAnimation(PHASES);
+  // Grab the (already-preloading) model so the slider can recompute edges
+  // in-place without re-running the animation.
+  useEffect(() => {
+    getModel().then((m) => { modelRef.current = m; }).catch(() => {});
+  }, []);
+
+  // 1800ms/phase = half the previous default sweep speed (the speed knob still
+  // scales from here). Only affects the forward-pass particles, not the input
+  // normalization morph (which has its own timer).
+  const anim = useAnimation(PHASES, { msPerPhase: 1800 });
   const { play, restart, snapToEnd } = anim;
 
   const cancelPreprocess = useCallback(() => {
@@ -85,7 +111,7 @@ export default function App() {
       );
     }
     try {
-      const result = await runInference(norm.input);
+      const result = await runInference(norm.input, edgeNRef.current);
       setTrace(result);
       setStatus("ready");
       restart();
@@ -109,7 +135,7 @@ export default function App() {
     setFocus(null);
     setInspect(null);
     try {
-      const result = await runInference(pixels);
+      const result = await runInference(pixels, edgeNRef.current);
       setTrace(result);
       setStatus("ready");
       snapToEnd();
@@ -180,6 +206,18 @@ export default function App() {
     restart();
   }, [restart, cancelPreprocess]);
 
+  // Move the Connections slider: recompute the trace's edges in place (same
+  // forward pass, more/fewer top connections) so the web re-densifies without
+  // replaying the animation. Only recomputes once a digit has been run.
+  const onEdgeSlider = useCallback((s) => {
+    setEdgeSlider(s);
+    const n = sliderToN(s);
+    edgeNRef.current = n;
+    if (modelRef.current && pixelsRef.current) {
+      setTrace(modelRef.current.predict(pixelsRef.current, n));
+    }
+  }, []);
+
   // Convenience: Enter runs inference, Escape clears (only in the infer tab).
   useEffect(() => {
     if (mode !== "infer") return;
@@ -195,9 +233,17 @@ export default function App() {
   // (only the strongest ~40 per layer). The architecture is fixed, so these are
   // known even before a run — the note is always shown.
   const layerSizes = trace ? trace.layers.map((l) => l.size) : [784, 512, 512, 10];
-  const totalConnections =
-    layerSizes[0] * layerSizes[1] + layerSizes[1] * layerSizes[2] + layerSizes[2] * layerSizes[3];
-  const perTransition = trace ? trace.transitions.map((t) => t.links.length) : [40, 40, 40];
+  const transCaps = [
+    layerSizes[0] * layerSizes[1],
+    layerSizes[1] * layerSizes[2],
+    layerSizes[2] * layerSizes[3],
+  ];
+  const totalConnections = transCaps.reduce((n, k) => n + k, 0);
+  // After a run, count the edges we actually drew; before one, show what the
+  // slider's current setting would draw (each transition capped at its size).
+  const perTransition = trace
+    ? trace.transitions.map((t) => t.links.length)
+    : transCaps.map((cap) => Math.min(edgeNRef.current, cap));
   const shownConnections = perTransition.reduce((n, k) => n + k, 0);
   const shownPct = totalConnections ? (shownConnections / totalConnections) * 100 : 0;
 
@@ -206,10 +252,18 @@ export default function App() {
       <header className="app-header">
         <h1>Watch a neural network think</h1>
         <p>
-          Draw a digit; it's normalized the way MNIST expects and pushed through a
-          784&nbsp;→&nbsp;512&nbsp;→&nbsp;512&nbsp;→&nbsp;10 network. The animation replays the
-          forward pass — neurons light by activation, and the strongest weighted paths trace how
-          the answer forms.
+          An artificial neural network is a stack of simple units — "neurons" — that
+          learn from examples to turn an input into an answer. This one recognizes
+          handwritten digits from <strong>MNIST</strong>, a classic dataset of{" "}
+          <strong>60,000</strong> training and <strong>10,000</strong> validation images, each a
+          28×28 grayscale digit (0–9). The model was already trained during NVIDIA's Deep
+          Learning{" "}
+          {LAB1_URL ? (
+            <a href={LAB1_URL} target="_blank" rel="noopener noreferrer">Lab&nbsp;1</a>
+          ) : (
+            "Lab 1"
+          )}{" "}
+          on Neural Networks — you're watching pure <strong>inference</strong>.
         </p>
       </header>
 
@@ -339,10 +393,27 @@ export default function App() {
             progress={anim.progress}
             focus={focus}
             prep={prep}
+            live={live}
             onPickOutput={handlePickOutput}
             onInspect={handleInspect}
           />
-          <Controls anim={anim} hasTrace={!!trace} />
+          <Controls anim={anim} hasTrace={!!trace}>
+            <label className="conn-ctrl" title="How many of the strongest connections to draw">
+              Connections
+              <input
+                type="range"
+                min="0"
+                max="1000"
+                step="1"
+                value={edgeSlider}
+                onChange={(e) => onEdgeSlider(Number(e.target.value))}
+                aria-label="Number of connections to draw"
+              />
+              <span className="conn-val">
+                {shownConnections.toLocaleString()} / {totalConnections.toLocaleString()}
+              </span>
+            </label>
+          </Controls>
           {trace && inspect && (
             <NeuronInspector
               data={inspect.data}
