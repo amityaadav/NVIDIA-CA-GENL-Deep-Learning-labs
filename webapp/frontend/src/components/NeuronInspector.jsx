@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import LegendItem from "./LegendItem.jsx";
 
 const EXCITE = [79, 227, 238];
 const INHIBIT = [224, 119, 110];
@@ -55,12 +56,18 @@ export default function NeuronInspector({ data, loading, onClose }) {
   if (loading) return <div className="inspector">Inspecting neuron…</div>;
   if (!data) return null;
 
-  const { layer, index, topTerms, bias, z, a, activation, sourceLayer } = data;
+  const { layer, index, topTerms, bias, z, a, activation, sourceLayer,
+          restCount, restContribution } = data;
   const fn = activation === "softmax" ? "softmax" : "ReLU";
   const outLabel = activation === "softmax" ? `${(a * 100).toFixed(1)}%` : a.toFixed(3);
+  const isInput = sourceLayer === "input";
   const termName = (src) =>
-    sourceLayer === "input" ? `px ${(src / 28) | 0},${src % 28}` : `#${src}`;
+    isInput ? `px ${(src / 28) | 0},${src % 28}` : `#${src}`;
   const signed = (v, p = 2) => `${v >= 0 ? "+" : "−"}${Math.abs(v).toFixed(p)}`;
+  // Column headers + z formula adapt to what the source layer actually is:
+  // pixels feed hidden_1 (value = ink intensity), activations feed the rest.
+  const srcHead = isInput ? "pixel (row, col)" : "neuron";
+  const valWord = isInput ? "intensity" : "activation";
 
   return (
     <div className="inspector">
@@ -71,7 +78,37 @@ export default function NeuronInspector({ data, loading, onClose }) {
 
       {data.weightImage && (
         <div className="inspector-section">
-          <span className="explain-label">What it looks for · weight image</span>
+          <LegendItem
+            className="explain-label weight-info"
+            title="Weight image · the neuron's template"
+            ariaLabel="What the weight image shows and where it comes from"
+            label="What it looks for · weight image"
+          >
+            <p>
+              This is the neuron's <strong>784 learned weights</strong> — one per input
+              pixel — laid back onto the 28×28 grid. <strong>Teal</strong> means a positive
+              weight (ink there <em>excites</em> this neuron); <strong>warm</strong> means a
+              negative weight (ink there <em>inhibits</em> it); brightness is the weight's
+              strength <strong>|w|</strong>. So it's a picture of the ink pattern this
+              particular neuron is tuned to look for.
+            </p>
+            <p>
+              Nobody drew this template. The weights started as small <strong>random</strong>
+              numbers; during training the network saw thousands of labeled MNIST digits, and
+              after each guess <strong>backpropagation</strong> measured how every weight
+              affected the error and <strong>gradient descent</strong> nudged it a little to do
+              better. Over many passes those nudges self-organized into this arrangement of
+              positive and negative weights — whatever helped the network tell digits apart.
+            </p>
+            <p>
+              On your drawing, each pixel's intensity is multiplied by its weight here — exactly
+              the terms in the table below. Ink landing on <em>teal</em> squares <strong>adds</strong>
+              to the neuron's total <em>z</em> (excitation); ink on <em>warm</em> squares{" "}
+              <strong>subtracts</strong> (inhibition); blank pixels add nothing. When your strokes
+              line up with the teal pattern and avoid the warm regions, <em>z</em> climbs and ReLU
+              lets the neuron <strong>fire</strong>; otherwise it stays quiet (or dead).
+            </p>
+          </LegendItem>
           <div className="weight-image">
             <canvas ref={canvasRef} />
             <span className="muted tiny">teal excites · warm inhibits · brightness = |weight|</span>
@@ -83,22 +120,43 @@ export default function NeuronInspector({ data, loading, onClose }) {
         <span className="explain-label">
           The math on this drawing · top {topTerms.length} of {sourceLayer}
         </span>
-        <ul className="term-list">
-          {topTerms.map((t, i) => (
-            <li key={i}>
-              <span className="mono term-src">{termName(t.src)}</span>
-              <span className="mono term-calc">{signed(t.weight)} × {t.value.toFixed(2)}</span>
-              <span className={`mono ${t.contribution >= 0 ? "excite-text" : "inhibit-text"}`}>
-                {signed(t.contribution)}
-              </span>
-            </li>
-          ))}
-          <li className="term-bias">
-            <span className="mono term-src">bias</span>
-            <span className="mono term-calc" />
-            <span className={`mono ${bias >= 0 ? "excite-text" : "inhibit-text"}`}>{signed(bias)}</span>
-          </li>
-        </ul>
+        <table className="term-table">
+          <thead>
+            <tr>
+              <th>{srcHead}</th>
+              <th className="num">weight × {valWord}</th>
+              <th className="num">contribution</th>
+            </tr>
+          </thead>
+          <tbody>
+            {topTerms.map((t, i) => (
+              <tr key={i}>
+                <td className="mono">{termName(t.src)}</td>
+                <td className="mono term-calc">{signed(t.weight)} × {t.value.toFixed(2)}</td>
+                <td className={`mono num ${t.contribution >= 0 ? "excite-text" : "inhibit-text"}`}>
+                  {signed(t.contribution)}
+                </td>
+              </tr>
+            ))}
+            {restCount > 0 && (
+              <tr className="term-rest">
+                <td className="mono">+ {restCount.toLocaleString()} more</td>
+                <td className="mono term-calc">×</td>
+                <td className={`mono num ${restContribution >= 0 ? "excite-text" : "inhibit-text"}`}>
+                  {restContribution != null ? signed(restContribution) : "×"}
+                </td>
+              </tr>
+            )}
+            <tr className="term-bias">
+              <td className="mono">bias</td>
+              <td className="mono term-calc" />
+              <td className={`mono num ${bias >= 0 ? "excite-text" : "inhibit-text"}`}>{signed(bias)}</td>
+            </tr>
+          </tbody>
+        </table>
+        <div className="term-formula mono muted">
+          z = Σ (weight × {valWord}) + bias
+        </div>
         <div className="term-result">
           z = {z.toFixed(3)} <span className="muted">→ {fn} →</span> a = {outLabel}
         </div>

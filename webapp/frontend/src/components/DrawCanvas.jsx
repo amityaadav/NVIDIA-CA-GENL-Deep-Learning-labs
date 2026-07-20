@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, forwardRef, useImperativeHandle } from "react";
+import SplitFlapHint from "./SplitFlapHint.jsx";
 
 const SIZE = 280; // display + backing size; multiple of 28 keeps downscaling clean
 
@@ -76,7 +77,7 @@ const DrawCanvas = forwardRef(function DrawCanvas({ onStrokeEnd }, ref) {
         onTouchEnd={end}
         aria-label="Draw a digit from 0 to 9"
       />
-      {blank && <div className="draw-placeholder">Draw a digit, then run inference</div>}
+      {blank && <SplitFlapHint />}
     </div>
   );
 });

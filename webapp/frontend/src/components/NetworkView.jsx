@@ -11,6 +11,7 @@ import {
   describeNeuron,
   reluNormalizedPoint,
 } from "../lib/inspect.js";
+import { registerPopover, closeOtherPopovers } from "../lib/popovers.js";
 
 const EXCITE = [79, 227, 238]; // cyan  -> positive contribution
 const INHIBIT = [224, 119, 110]; // warm -> negative contribution
@@ -37,13 +38,29 @@ const mix = ([r1, g1, b1], [r2, g2, b2], t) => [
 ];
 const rgba = ([r, g, b], a) => `rgba(${r},${g},${b},${a})`;
 
-export default function NetworkView({ trace, progress, focus, prep, onPickOutput, onInspect }) {
+export default function NetworkView({ trace, progress, focus, prep, live, onPickOutput, onInspect }) {
   const canvasRef = useRef(null);
   const positions = useMemo(computePositions, []);
   const infoIconsRef = useRef([]); // clickable info-icon hitboxes, filled by draw()
   const [hovered, setHovered] = useState(null);
   const [info, setInfo] = useState(null); // clicked layer explanation { layer, px, py }
   const [overIcon, setOverIcon] = useState(false);
+  const [hint, setHint] = useState(null); // one-time "click a node" nudge { x, y, leaving }
+  const hintTimers = useRef([]);
+  const hintDoneRef = useRef(false); // plays the nudge at most once per session
+
+  const dismissHint = () => {
+    if (hintTimers.current.length) {
+      hintTimers.current.forEach(clearTimeout);
+      hintTimers.current = [];
+    }
+    setHint((h) => (h ? null : h));
+  };
+
+  // Register the canvas layer-info tooltip in the shared popover registry so it
+  // closes when any other "i" popover opens (and vice versa).
+  const infoCloseRef = useRef(() => setInfo(null));
+  useEffect(() => registerPopover(infoCloseRef.current), []);
 
   // Precompute the focused sub-network as fast membership sets per layer.
   const focusSets = useMemo(() => {
@@ -69,6 +86,36 @@ export default function NetworkView({ trace, progress, focus, prep, onPickOutput
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     draw(ctx, positions, trace, progress, hovered, focusSets, prep, infoIconsRef.current, info?.layer ?? null);
   }, [positions, trace, progress, hovered, focusSets, prep, info]);
+
+  // One-time onboarding nudge: once the forward pass has fully settled (progress
+  // reaches the last layer, so the probability bars are done), wait 0.5s, then
+  // point a cursor at a Hidden 1 node and "click" it with a hint, and fade the
+  // whole thing out 4s later. Skipped in Live mode.
+  useEffect(() => {
+    if (!trace || focus || live || hintDoneRef.current) return;
+    if (progress < trace.layers.length) return; // not settled yet
+    hintDoneRef.current = true;
+    const timers = hintTimers.current;
+    timers.push(setTimeout(() => {
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      const rect = canvas.getBoundingClientRect();
+      // Point at the brightest Hidden 1 neuron so the cursor lands on a lit node.
+      const acts = trace.layers[COL.hidden_1].activations;
+      let peak = 0;
+      for (let i = 1; i < acts.length; i++) if (acts[i] > acts[peak]) peak = i;
+      const p = positions[COL.hidden_1][peak];
+      setHint({ x: (p.x / W) * rect.width, y: (p.y / H) * rect.height, leaving: false });
+      timers.push(setTimeout(() => setHint((h) => (h ? { ...h, leaving: true } : h)), 4000));
+      timers.push(setTimeout(() => setHint(null), 4450));
+    }, 500));
+  }, [progress, trace, focus, live, positions]);
+
+  // Only retire the nudge when the drawing is cleared — hovering or clicking
+  // nodes leaves it up so it stays explicit rather than vanishing by accident.
+  useEffect(() => {
+    if (!trace) dismissHint();
+  }, [trace]);
 
   const toLogical = (e) => {
     const rect = canvasRef.current.getBoundingClientRect();
@@ -116,16 +163,18 @@ export default function NetworkView({ trace, progress, focus, prep, onPickOutput
 
     const ic = iconAt(lx, ly);
     if (ic) {
-      setInfo((cur) => {
-        if (cur && cur.layer === ic.layer) return null; // toggle off
+      if (info && info.layer === ic.layer) {
+        setInfo(null); // second click on the same icon toggles it off
+      } else {
         // Fixed-width tooltip centered on the icon, clamped fully on-stage.
         const half = INFO_TIP_W / 2, pad = 10;
         const minL = half + pad, maxL = rect.width - half - pad;
         const center = (ic.x / W) * rect.width;
         const px = maxL > minL ? Math.max(minL, Math.min(maxL, center)) : rect.width / 2;
         const py = (ic.y / H) * rect.height + 14;
-        return { layer: ic.layer, px, py };
-      });
+        closeOtherPopovers(infoCloseRef.current); // opening → close other popovers
+        setInfo({ layer: ic.layer, px, py });
+      }
       return;
     }
 
@@ -170,6 +219,25 @@ export default function NetworkView({ trace, progress, focus, prep, onPickOutput
         <div className="info-tip" style={{ left: `${info.px}px`, top: `${info.py}px` }}>
           <span className="info-tip-title">{infoTip.title}</span>
           <span className="info-tip-body">{infoTip.body}</span>
+        </div>
+      )}
+      {hint && (
+        <div
+          className={`node-hint ${hint.leaving ? "leaving" : ""}`}
+          style={{ left: `${hint.x}px`, top: `${hint.y}px` }}
+          aria-hidden="true"
+        >
+          <span className="node-hint-ring" />
+          <svg className="node-hint-cursor" viewBox="0 0 24 24" width="22" height="22">
+            <path
+              d="M4 3 L4 21 L9 16 L12 22 L15 20.5 L12 15 L19 15 Z"
+              fill="#fff"
+              stroke="#0b0f14"
+              strokeWidth="1.3"
+              strokeLinejoin="round"
+            />
+          </svg>
+          <span className="node-hint-label">Click a node to learn more</span>
         </div>
       )}
     </div>
@@ -643,11 +711,13 @@ function drawPreprocessMorph(ctx, positions, prep) {
  * drives each step's fade-in and its strikethrough as it completes; pass t=1 to
  * render the finished, fully-struck list that persists after the morph.
  */
+// Each step's text only appears once the previous step's checkmark has fully
+// faded in (appear[n] = done[n-1] + DONE_DUR), so it reads as check-then-next.
 const NORMALIZE_STEPS = [
-  { appear: 0.05, done: 0.20, text: "1 · crop to the ink" },
-  { appear: 0.22, done: 0.40, text: "2 · scale to 20 px" },
-  { appear: 0.42, done: 0.60, text: "3 · center by mass" },
-  { appear: 0.62, done: 0.82, text: "4 · sample to 28×28 px" },
+  { appear: 0.04, done: 0.16, text: "1 · crop to the ink" },
+  { appear: 0.28, done: 0.40, text: "2 · scale to 20 px" },
+  { appear: 0.52, done: 0.64, text: "3 · center by mass" },
+  { appear: 0.76, done: 0.88, text: "4 · sample to 28×28 px" },
 ];
 
 function _normalizeLayout(positions) {

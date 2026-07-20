@@ -1,3 +1,13 @@
+/* Self-hosted so it works within the production CSP (default-src 'self') and
+   under the GitHub Pages base path — Vite hashes + rewrites this URL. */
+@font-face {
+  font-family: "Orbitron";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("./fonts/orbitron-700.ttf") format("truetype");
+}
+
 :root {
   --bg: #0a0d12;
   --panel: #11161d;
@@ -35,11 +45,12 @@ body {
 }
 .app-header p {
   color: var(--muted);
-  max-width: 720px;
+  max-width: 1192px; /* full .app content width (1240 − 24px padding × 2) */
   line-height: 1.6;
   margin: 0 0 28px;
   font-size: 15px;
 }
+.app-header p a { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
 
 /* Mode tabs (Watch it think / Watch it learn) */
 .mode-tabs {
@@ -222,17 +233,46 @@ body {
   cursor: crosshair;
   touch-action: none;
 }
-.draw-placeholder {
+/* Split-flap board prompt shown on the blank canvas (soft grey, not in-your-face). */
+.flap-board {
   position: absolute;
   inset: 0;
   display: flex;
+  flex-wrap: wrap;
+  align-content: center;
+  justify-content: center;
+  gap: 5px 0;
+  padding: 0 8px;
+  pointer-events: none; /* let strokes pass through to the canvas */
+  perspective: 260px;
+  font-family: "Orbitron", var(--mono);
+}
+.flap {
+  /* Fixed width so cycling through different-width glyphs never reflows the
+     line — each letter flips in place instead of the whole word jittering. */
+  flex: 0 0 14px;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
-  text-align: center;
-  padding: 0 24px;
-  color: #9aa4ad;
-  font-size: 15px;
-  pointer-events: none; /* let strokes pass through to the canvas */
+  height: 20px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #aeb7bf;
+}
+.flap-gap { flex-basis: 7px; } /* word spaces: a narrower blank tile */
+.flap-break { flex-basis: 100%; height: 0; } /* forces the second line to wrap */
+.flap-glyph {
+  display: inline-block;
+  transform-origin: center top;
+  backface-visibility: hidden;
+  animation: flap-in 0.13s ease-out;
+}
+@keyframes flap-in {
+  0% { transform: rotateX(-88deg); opacity: 0.25; }
+  100% { transform: rotateX(0deg); opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .flap-glyph { animation: none; }
 }
 .draw-actions { display: flex; gap: 10px; margin-top: 16px; }
 .draw-actions button { flex: 1; }
@@ -265,6 +305,49 @@ body {
   border-radius: 12px;
   border: 1px solid var(--border);
   cursor: crosshair;
+}
+
+/* One-time "click a node" nudge, shown after the first forward pass settles.
+   Anchored (left/top set inline) at the winning output node's center; children
+   are offset from that point. Non-interactive so clicks pass through to it. */
+.node-hint {
+  position: absolute; z-index: 6; pointer-events: none;
+  animation: hint-in 0.3s ease both;
+  transition: opacity 0.4s ease;
+}
+.node-hint.leaving { opacity: 0; animation: none; }
+@keyframes hint-in { from { opacity: 0; } to { opacity: 1; } }
+.node-hint-ring {
+  position: absolute; left: 0; top: 0; width: 12px; height: 12px;
+  margin: -6px 0 0 -6px; border: 2px solid var(--accent); border-radius: 50%;
+  animation: hint-ripple 1.4s ease-out infinite;
+}
+@keyframes hint-ripple {
+  0% { transform: scale(0.7); opacity: 0.9; }
+  100% { transform: scale(4.4); opacity: 0; }
+}
+.node-hint-cursor {
+  position: absolute; left: 0; top: 0;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.7));
+  animation: hint-press 1.4s ease-in-out infinite;
+}
+@keyframes hint-press {
+  0%, 100% { transform: translate(9px, 9px) scale(1); }
+  18% { transform: translate(5px, 5px) scale(0.82); }
+  34% { transform: translate(9px, 9px) scale(1); }
+}
+.node-hint-label {
+  position: absolute; left: 0; top: 0;
+  transform: translate(18px, -50%);
+  white-space: nowrap;
+  background: rgba(13, 18, 25, 0.98);
+  border: 1px solid var(--accent-dim);
+  color: var(--ink); font-size: 12px;
+  padding: 5px 9px; border-radius: 8px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.5);
+}
+@media (prefers-reduced-motion: reduce) {
+  .node-hint-ring, .node-hint-cursor { animation: none; }
 }
 
 /* Hover tooltip for neuron inspection */
@@ -417,17 +500,21 @@ body {
   border-radius: 6px;
 }
 .tiny { font-size: 10px; }
-.term-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
-.term-list li {
-  display: grid;
-  grid-template-columns: 74px 1fr auto;
-  gap: 10px;
-  font-size: 12px;
-  align-items: baseline;
+.term-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.term-table th {
+  font-family: var(--mono); font-size: 9.5px; color: var(--faint); font-weight: 500;
+  text-transform: uppercase; letter-spacing: 0.05em; text-align: left;
+  padding: 0 0 4px; border-bottom: 1px solid var(--border);
 }
-.term-src { color: var(--muted); }
+.term-table td { padding: 2px 0; vertical-align: baseline; }
+.term-table td:first-child { color: var(--muted); }
+/* numeric columns right-align so decimals line up */
+.term-table th.num, .term-table td.num { text-align: right; }
+.term-table th:not(:first-child), .term-table td:not(:first-child) { padding-left: 14px; }
 .term-calc { color: var(--faint); text-align: right; }
-.term-bias { border-top: 1px dashed var(--border); margin-top: 3px; padding-top: 4px; }
+.term-rest td:first-child { font-style: italic; }
+.term-bias td { border-top: 1px dashed var(--border); padding-top: 4px; }
+.term-formula { margin-top: 6px; font-size: 12px; color: var(--faint); }
 .term-result {
   margin-top: 6px;
   font-family: var(--mono);
@@ -479,6 +566,15 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   font-family: var(--mono);
   font-size: 12px;
 }
+/* Vertical divider between the Speed and Connections controls. */
+.ctrl-sep { width: 1px; height: 20px; background: var(--border); margin: 0 4px; }
+.controls .conn-ctrl {
+  display: flex; align-items: center; gap: 8px;
+  font-family: var(--mono); font-size: 11px; color: var(--muted);
+  text-transform: uppercase; letter-spacing: 0.06em;
+}
+.controls .conn-ctrl input { accent-color: var(--accent); cursor: pointer; }
+.conn-val { color: var(--accent); min-width: 116px; }
 .legend { position: relative; display: inline-flex; align-items: center; gap: 7px; }
 .dot { width: 11px; height: 11px; border-radius: 50%; display: inline-block; }
 
@@ -505,6 +601,20 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   z-index: 5;
   width: 300px;
   max-width: 80vw;
+}
+/* The "why only the strongest connections?" popover holds more copy — 10px wider.
+   The popover is a sibling of the .conn-count label, hence the ~ combinator. */
+.conn-count ~ .legend-pop {
+  width: 310px;
+}
+/* The weight-image popover opens upward so it doesn't cover the image below it,
+   and is wider so the explanation isn't a tall narrow column. */
+.weight-info ~ .legend-pop {
+  top: auto;
+  bottom: calc(100% + 8px);
+  width: 340px;
+}
+.legend-pop {
   background: rgba(13, 18, 25, 0.98);
   border: 1px solid var(--accent-dim);
   border-radius: 10px;
